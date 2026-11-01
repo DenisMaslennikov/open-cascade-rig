@@ -523,6 +523,7 @@ def main() -> int:
         errors = list((payload.get("validation") or {}).get("errors") or [])
         warnings = list((payload.get("validation") or {}).get("warnings") or [])
     else:
+        brief = load_request(args.request)
         schema, errors, warnings = generate(cfg, brief, requirements, repo, out_dir, args.workers)
         for warning in warnings:
             print("warn: " + warning, file=sys.stderr)
