@@ -8,6 +8,7 @@ shown, and a card is blocked when it waits for another card that is not done or 
 
 from __future__ import annotations
 
+import importlib
 import json
 import re
 import sys
@@ -94,6 +95,19 @@ def routes(
 
 def client(routes_: dict, **kwargs) -> vk.VikunjaClient:
     return vk.VikunjaClient(BASE, token="test-token", transport=FakeTransport(routes_), **kwargs)
+
+
+def test_the_module_is_importable_through_the_package_path_the_rail_task_uses():
+    """Subtask 184.2 imports `tools.wrapper.vikunja_client` from the repository root; a rename or a
+    wrapper `__init__.py` that changes the path would break it without any test noticing."""
+    root = str(Path(__file__).resolve().parents[1])
+    sys.path.insert(0, root)
+    try:
+        module = importlib.import_module("tools.wrapper.vikunja_client")
+    finally:
+        sys.path.remove(root)
+    assert Path(str(module.__file__)).resolve() == Path(str(vk.__file__)).resolve()
+    assert module.VikunjaClient.__name__ == "VikunjaClient"
 
 
 # --------------------------------------------------------------------------- projects by slug
