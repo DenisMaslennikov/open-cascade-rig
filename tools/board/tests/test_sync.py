@@ -6,6 +6,7 @@ policy). These tests pin those functions, so a change in the rules is a visible 
 
 from __future__ import annotations
 
+import json
 import sys
 import unittest
 from pathlib import Path
@@ -37,6 +38,10 @@ def card(
         "priority": priority,
         "related_tasks": {"blocked": [{"id": b} for b in blocked or []]},
     }
+
+
+def epic_card(cid: int, **kwargs) -> dict:
+    return {**card(cid, **kwargs), "labels": [{"title": "epic"}]}
 
 
 def pr(number: int, title: str, state: str = "open", merged: bool = False) -> dict:
@@ -163,6 +168,12 @@ class Rules(unittest.TestCase):
         actions, _ = sync.desired_state(cards, columns, [], {**POLICY, "max_plan": 3})
         self.assertEqual([a["card"] for a in actions], [1, 2])
 
+    def test_null_max_plan_moves_every_unblocked_card(self):
+        cards = {cid: card(cid) for cid in range(1, 6)}
+        columns = {cid: "Backlog" for cid in cards}
+        actions, _ = sync.desired_state(cards, columns, [], {**POLICY, "max_plan": None})
+        self.assertEqual([a["card"] for a in actions], [1, 2, 3, 4, 5])
+
     def test_a_full_plan_moves_nothing(self):
         cards = {1: card(1), 2: card(2), 3: card(3), 4: card(4)}
         columns = {1: "Plan", 2: "Plan", 3: "Plan", 4: "Backlog"}
@@ -198,10 +209,32 @@ class Rules(unittest.TestCase):
         again, _ = sync.desired_state(patched, column, prs, POLICY)
         self.assertEqual(again, [])
 
+    def test_a_container_card_is_never_queued(self):
+        cards = {1: epic_card(1), 2: card(2)}
+        columns = {1: "Backlog", 2: "Backlog"}
+        actions, _ = sync.desired_state(cards, columns, [], POLICY)
+        self.assertEqual([a["card"] for a in actions], [2])
+
+    def test_a_container_card_is_not_moved_by_a_pull_request(self):
+        cards = {1: epic_card(1)}
+        actions, _ = sync.desired_state(cards, {1: "Backlog"}, [pr(9, "[#1] stage")], POLICY)
+        self.assertEqual(actions, [])
+
+    def test_a_container_card_flagged_done_still_goes_to_done(self):
+        cards = {1: epic_card(1, done=True)}
+        actions, _ = sync.desired_state(cards, {1: "Plan"}, [], POLICY)
+        self.assertEqual([(a["card"], a["to"], a["reason"]) for a in actions], [(1, "Done", "done-drift")])
+
     def test_card_without_a_bucket_counts_as_backlog(self):
         cards = {1: card(1)}
         actions, _ = sync.desired_state(cards, {}, [], POLICY)
         self.assertEqual([(a["from"], a["to"]) for a in actions], [("Backlog", "Plan")])
+
+
+class ShippedPolicy(unittest.TestCase):
+    def test_the_plan_queue_is_not_capped(self):
+        policy = json.loads((Path(__file__).resolve().parents[1] / "policy.json").read_text())
+        self.assertIsNone(policy["max_plan"], "Plan takes every unblocked card unless a number is set")
 
 
 if __name__ == "__main__":

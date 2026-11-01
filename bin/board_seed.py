@@ -185,6 +185,11 @@ def main() -> int:
         if not label_id:
             label_id = board.create_label(name, STAGE_COLORS[index % len(STAGE_COLORS)], stage.get("intent", "")[:250])
         label_ids[stage["id"]] = label_id
+    epic_label = labels.get("epic")
+    if not epic_label:
+        # Контейнерная карточка (этап): sync её не двигает, иначе все этапы уезжают в Plan.
+        epic_label = board.create_label("epic", "8e44ad",
+                                        "Контейнерная карточка (этап, бриф), а не работа")
     designer_label = labels.get(f"{args.project.upper()} · designer")
     if not designer_label:
         designer_label = board.create_label(f"{args.project.upper()} · designer", "d94f8a", "Задачи роли designer")
@@ -218,7 +223,7 @@ def main() -> int:
 
     for stage in stages:
         stage_card = f"Этап {stage['id'].upper()} — {stage.get('title', '')}"
-        ensure(stage_card, stage_body(stage), [label_ids[stage["id"]]])
+        ensure(stage_card, stage_body(stage), [label_ids[stage["id"]], epic_label])
         for task in stage.get("tasks") or []:
             title = f"{task['id']} — {task.get('title', '')}"[:250]
             task_id = ensure(title, card_body(stage, task), [label_ids[stage["id"]]])
