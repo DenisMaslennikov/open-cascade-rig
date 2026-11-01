@@ -10,7 +10,10 @@ cosmetic problem; it is the wrong status shown to the person paying for the work
 - The board follows GitHub by itself: `tools/board/sync.py` (`.github/workflows/board.yml`) runs on
   every pull-request event and derives the whole state from the pull requests — PR open → `Review`,
   merged → `Done`, closed unmerged → `Plan`, and an unblocked `Backlog` card fills a free `Plan`
-  slot, highest priority first. `max_plan` in `tools/board/policy.json` caps that queue.
+  slot, highest priority first — with `max_plan: null` in `tools/board/policy.json` that means every unblocked card, not a capped queue.
+- A container card (a roadmap stage, a design brief) carries the `epic` label and is never moved by
+  the sync — without the label a stage card would flood `Plan` as "unblocked"; `board_seed.py`
+  labels the stage cards it creates.
 - A pull request names its card at the start of the title: `[#174] chore: …`. The `PR title names a
   card` job rejects a title without the `[#<card>]` prefix. Since GitHub appends `(#8)`, a bare
   `#8` in a title is the pull-request number and links nothing.

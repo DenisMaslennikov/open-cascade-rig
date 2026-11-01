@@ -15,8 +15,8 @@ The board follows GitHub, never the other way round:
     merged PR    → Done (and `done = true`)
     closed PR    → Plan (the work went back to the queue)
     done card    → Done (repairs a card left in another column)
-    all blockers done → Backlog → Plan, highest priority first, at most `max_plan`
-    in Plan at a time (a card blocked by a card that is not in `cards` stays put)
+    all blockers done → Backlog → Plan, highest priority first; `max_plan: null` means
+    every unblocked card goes to Plan (a card blocked by a card missing from `cards` stays put)
 
 The run is idempotent: every action is derived from the current state, applied, then the
 state is recomputed and must produce no actions. A run with nothing to do prints nothing —
@@ -53,8 +53,11 @@ DEFAULT_POLICY = {
     "plan_column": "Plan",
     "review_column": "Review",
     "done_column": "Done",
-    "max_plan": 3,
+    "max_plan": None,
     "max_prs": 100,
+    # A container card (a roadmap stage, a design brief) is not work: it carries this label and
+    # the sync never moves it. Without the label a stage card would flood Plan as "unblocked".
+    "skip_labels": ["epic"],
 }
 
 
@@ -142,6 +145,11 @@ def desired_state(
     done_column = policy["done_column"]
     backlog_column = policy["backlog_column"]
 
+    skipped = {str(t).lower() for t in (policy.get("skip_labels") or [])}
+    epic = {
+        cid: any((label.get("title") or "").lower() in skipped for label in (card.get("labels") or []))
+        for cid, card in cards.items()
+    }
     column = {cid: (columns.get(cid) or backlog_column) for cid in cards}
     done = {cid: bool(card.get("done")) for cid, card in cards.items()}
     priority = {cid: int(card.get("priority") or 0) for cid, card in cards.items()}
@@ -159,6 +167,8 @@ def desired_state(
 
     # 1. What the pull request says.
     for cid in sorted(linked):
+        if epic[cid]:
+            continue
         pr = linked[cid]
         number = int(pr["number"])
         state = pr_state(pr)
@@ -179,15 +189,16 @@ def desired_state(
         if done[cid] and column[cid] != done_column:
             act(cid, done_column, "done-drift")
 
-    # 3. Refill Plan with unblocked Backlog cards, in order.
-    free = max(
-        0,
-        int(policy["max_plan"])
-        - sum(1 for cid in column if column[cid] == plan_column),
-    )
+    # 3. Every unblocked Backlog card goes to Plan, in order. `max_plan: null` means "all of
+    #    them"; a number caps the queue and the rest wait in Backlog.
+    cap = policy.get("max_plan")
+    if cap in (None, "", "none", "null", 0):
+        free = None
+    else:
+        free = max(0, int(cap) - sum(1 for cid in column if column[cid] == plan_column))
     queue: list[int] = []
     for cid in sorted(cards):
-        if done[cid] or column[cid] != backlog_column:
+        if epic[cid] or done[cid] or column[cid] != backlog_column:
             continue
         blockers = blockers_of(cards[cid])
         unknown = [b for b in blockers if b not in cards]
@@ -199,7 +210,7 @@ def desired_state(
             continue
         queue.append(cid)
     queue.sort(key=lambda cid: (-priority[cid], cid))
-    for cid in queue[:free]:
+    for cid in queue if free is None else queue[:free]:
         act(cid, plan_column, "unblocked", unblocked_by=blockers_of(cards[cid]))
 
     return actions, warnings
