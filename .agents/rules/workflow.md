@@ -54,6 +54,21 @@ When debt is deliberately deferred by that decision, it must be visible, not sil
    blocks its card until it is merged, because work against unmerged code is work against a guess.
 4. Nothing is "done" until the pull request is merged, the board says so, and the cost is on the card.
 
+## Limits
+
+**No limits by default.** No cost cap, no reasoning cap, no phase timer on a role run: limits are decided
+later, from measured statistics, each as its own card. Reasoning that looks expensive is not by itself a
+reason to stop a run — a reasoning model spending its output budget on thinking is normal behaviour, not
+a loop.
+
+- `run_role.py --budget` exists as an operator choice and is off unless given; when given it is in
+  OpenRouter list dollars and is scaled into the currency the runtime bills in, so the number means what
+  it says.
+- What remains is loop protection, not policy: `--iterations` and `--timeout` stop a run that is not
+  progressing. Changing them is a card like anything else.
+- Statistics before limits: `usage.py` and the weekly OpenRouter report accumulate tokens, reasoning
+  tokens and empty answers. A future limit cites that data.
+
 ## Gates (the scripts live outside the repository)
 
 ```bash
