@@ -38,6 +38,10 @@ Read this first, then only the files the task actually touches. Everything here 
 10. **The rig develops itself.** A change to `bin/`, `config/` or a gate becomes a card that the
    cascade executes; the orchestrator opens cards, arbitrates and merges. Hooks and CI wiring are the
    declared exception, written by the orchestrator with the debt recorded.
+11. **No accumulated tech debt.** A problem found inside a task is fixed inside that task — same card,
+   same pull request. If it cannot be (a contract or a rule another task depends on, a decision the
+   task does not own, a cost past the task's budget), ask the human before finishing, with the options
+   and a recommendation. A card records the human's decision; it is not a way to avoid asking.
 
 ## Commands
 
