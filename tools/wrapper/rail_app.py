@@ -19,13 +19,15 @@ path (`tools.wrapper.<module>`) with the repository root on `sys.path`.
 
 from __future__ import annotations
 
+import argparse
+import sys
 from collections.abc import Callable, Sequence
 from pathlib import Path
 
-from tools.wrapper.rail_server import RailServer
+from tools.wrapper.rail_server import RailServer, UnknownProjectError
 from tools.wrapper.rail_state import CardView
-from tools.wrapper.sessions_store import SessionRow, SessionsStore
-from tools.wrapper.vikunja_client import VikunjaClient
+from tools.wrapper.sessions_store import SessionRow, SessionsStore, SessionsStoreError
+from tools.wrapper.vikunja_client import UnknownProject, VikunjaClient, VikunjaError
 
 
 def cards_source(client: VikunjaClient) -> Callable[[str], Sequence[CardView]]:
@@ -49,7 +51,27 @@ def cards_source(client: VikunjaClient) -> Callable[[str], Sequence[CardView]]:
         UnknownProjectError: Raised by the returned callable for a project the board does not have.
         VikunjaError: Raised by the returned callable when the board itself fails.
     """
-    raise NotImplementedError
+
+    def source(project: str) -> Sequence[CardView]:
+        try:
+            cards = client.plan_cards(project)
+        except UnknownProject as error:
+            raise UnknownProjectError(str(error)) from error
+        except VikunjaError:
+            raise
+
+        return [
+            CardView(
+                id=card.id,
+                title=card.title,
+                labels=tuple((label.title, label.colour) for label in card.labels),
+                blocked=card.blocked,
+                url=card.url,
+            )
+            for card in cards
+        ]
+
+    return source
 
 
 def sessions_source(store: SessionsStore) -> Callable[[int], Sequence[SessionRow]]:
@@ -67,7 +89,11 @@ def sessions_source(store: SessionsStore) -> Callable[[int], Sequence[SessionRow
     Raises:
         SessionsStoreError: Raised by the returned callable when the store cannot be read.
     """
-    raise NotImplementedError
+
+    def source(limit: int) -> Sequence[SessionRow]:
+        return store.active(limit)
+
+    return source
 
 
 def build_server(
@@ -102,7 +128,29 @@ def build_server(
         FileNotFoundError: `static_dir` is not an existing directory; the message names it.
         SessionsStoreError: `db_path` is not an existing file; the message names it.
     """
-    raise NotImplementedError
+    # Validate static_dir exists
+    if not static_dir.exists() or not static_dir.is_dir():
+        raise FileNotFoundError(f"static directory not found: {static_dir}")
+
+    # Validate db_path exists
+    if not db_path.exists() or not db_path.is_file():
+        raise SessionsStoreError(f"session store not found: {db_path}")
+
+    # Create the sessions store
+    store = SessionsStore(db_path)
+
+    # Build the sources
+    cards_src = cards_source(client)
+    sessions_src = sessions_source(store)
+
+    # Create and return the server
+    return RailServer(
+        cards_source=cards_src,
+        sessions_source=sessions_src,
+        static_dir=static_dir,
+        host=host,
+        port=port,
+    )
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -131,7 +179,69 @@ def main(argv: list[str] | None = None) -> int:
     Raises:
         SystemExit: A required option is missing or malformed; `argparse` reports it and exits `2`.
     """
-    raise NotImplementedError
+    parser = argparse.ArgumentParser(description="Run the wrapper rail server")
+    parser.add_argument("--host", required=True, help="Host to bind to")
+    parser.add_argument("--port", required=True, help="Port to bind to")
+    parser.add_argument("--static-dir", required=True, help="Directory with static files")
+    parser.add_argument("--db", required=True, help="Path to session store database")
+
+    args = parser.parse_args(argv)
+
+    # Parse port as integer
+    try:
+        port = int(args.port)
+    except ValueError:
+        parser.error("--port must be an integer")
+
+    # Validate static directory
+    static_dir = Path(args.static_dir)
+    if not static_dir.exists() or not static_dir.is_dir():
+        print(f"ERROR: static directory not found: {static_dir}", file=sys.stderr)
+        return 1
+
+    # Validate database path
+    db_path = Path(args.db)
+    if not db_path.exists() or not db_path.is_file():
+        print(f"ERROR: session store not found: {db_path}", file=sys.stderr)
+        return 1
+
+    # Build the client (will use environment/config)
+    try:
+        client = VikunjaClient()
+    except Exception as e:
+        print(f"ERROR: board client configuration failed: {e}", file=sys.stderr)
+        return 1
+
+    # Build the server
+    try:
+        server = build_server(
+            host=args.host,
+            port=port,
+            static_dir=static_dir,
+            db_path=db_path,
+            client=client,
+        )
+    except Exception as e:
+        print(f"ERROR: cannot build rail: {e}", file=sys.stderr)
+        return 1
+
+    # Start the server
+    try:
+        server.start()
+    except Exception as e:
+        print(f"ERROR: cannot start rail: {e}", file=sys.stderr)
+        return 1
+
+    # Print the URL
+    print(server.url)
+
+    # Wait for interrupt
+    _wait_for_interrupt()
+
+    # Stop the server
+    server.stop()
+
+    return 0
 
 
 def _wait_for_interrupt() -> None:
@@ -142,7 +252,22 @@ def _wait_for_interrupt() -> None:
     keeps the exit path of an ordinary return. It is a function of its own so a test can drive
     `main` through an injected server without a real interrupt.
     """
-    raise NotImplementedError
+    try:
+        import signal
+        import time
+
+        # Set up signal handler to catch SIGINT
+        def signal_handler(sig, frame):
+            pass  # We just want to interrupt the sleep
+
+        signal.signal(signal.SIGINT, signal_handler)
+
+        # Sleep indefinitely until interrupted
+        while True:
+            time.sleep(1)
+    except KeyboardInterrupt:
+        # KeyboardInterrupt is caught and ignored as per specification
+        pass
 
 
 if __name__ == "__main__":
