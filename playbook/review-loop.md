@@ -37,6 +37,6 @@ bin/review_fix_loop.py --project <slug> --plan plan.json --subtask <id> --worktr
 ## Cost reality
 
 Reviews are the most expensive part of the loop when done by an agent: each turn resends the whole
-conversation. Measured on this rig: a four-file diff reviewed by a `deepseek-v4-pro` agent cost
-$4.4–6.5 at 10–33 iterations; the same diff through pr-agent cost cents; a `qwen3.8-max` agent burned
-$26 and produced no report at all. See `costs.md`.
+conversation, so a review of one four-file diff cost ~544k input tokens across 15 calls, against ~8k
+tokens for the same diff through pr-agent. Price those tokens with `bin/prices_openrouter.py`; do not
+quote local gateway prices, which are 30-70x the list price. See `costs.md`.
