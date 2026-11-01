@@ -1,0 +1,61 @@
+name: Board
+
+# The board follows GitHub, never the other way round. A pull request names its card in the
+# title — `[#18] s0-t4: implant bonuses` — and every pull-request event re-derives the whole
+# board state from the pull requests. Deterministic: same inputs, same moves, no agent.
+#
+#   title — rejects a PR whose title does not name exactly one card. GitHub-hosted, no secrets,
+#           so it guards forks as well.
+#   sync  — applies the rules to Vikunja: open PR → Review, merged PR → Done, closed PR → Plan,
+#           done card → Done, and an unblocked Backlog card fills a free Plan slot, highest
+#           priority first. Needs the board, so it runs on the self-hosted runner (owner PRs
+#           only). A run with nothing to do prints nothing.
+#
+# The 03:17 run is a safety net, not the mechanism: the mechanism is the pull-request events.
+
+on:
+  pull_request:
+    types: [opened, edited, reopened, synchronize, ready_for_review, converted_to_draft, closed]
+  workflow_dispatch:
+  schedule:
+    - cron: "17 3 * * *"
+
+permissions:
+  contents: read
+  pull-requests: read
+
+concurrency:
+  group: board-${{ github.repository }}
+  cancel-in-progress: false
+
+jobs:
+  title:
+    name: PR title names a card
+    if: github.event_name == 'pull_request' && github.event.action != 'closed'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check the title
+        env:
+          TITLE: ${{ github.event.pull_request.title }}
+        run: python3 tools/board/sync.py --check-title "$TITLE"
+
+  sync:
+    name: Vikunja
+    if: >
+      github.event_name != 'pull_request' ||
+      (github.actor == github.repository_owner &&
+       github.event.pull_request.head.repo.full_name == github.repository)
+    runs-on: [self-hosted, cascade]
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Test the rules
+        run: python3 -m unittest discover -s tools/board/tests
+      - name: Sync
+        env:
+          VIKUNJA_URL: ${{ secrets.VIKUNJA_URL || 'http://vikunja:3456/api/v1' }}
+          VIKUNJA_TOKEN: ${{ secrets.VIKUNJA_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: python3 tools/board/sync.py --apply
