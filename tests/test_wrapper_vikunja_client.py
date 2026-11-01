@@ -236,6 +236,22 @@ def test_a_relation_payload_of_the_wrong_shape_does_not_break_the_card(payload: 
     assert only.blocked is False
 
 
+@pytest.mark.parametrize(
+    ("path", "answer"),
+    [
+        ("/projects/7/views", 5),
+        ("/projects/7/views/30/tasks", [{"id": 48, "title": "Plan", "tasks": 5}]),
+    ],
+)
+def test_an_answer_of_the_wrong_type_is_a_board_error_not_a_crash(path: str, answer: object):
+    """A board or a proxy in front of it can answer with JSON of another shape; the client has to say
+    the board answered badly instead of letting a `for` loop raise TypeError."""
+    routes_ = routes()
+    routes_[("GET", path)] = (200, answer)
+    with pytest.raises(vk.VikunjaError):
+        client(routes_).plan_cards("cascade-rig")
+
+
 # --------------------------------------------------------------------------- transport and config
 
 
