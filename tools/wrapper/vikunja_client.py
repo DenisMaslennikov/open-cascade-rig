@@ -18,12 +18,14 @@ import argparse
 import json
 import os
 import re
+import sys
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol
 
+BLOCKED = "blocked"
 CREDS_PATH = Path("~/.config/vikunja/creds.json")
 DASH_SPLIT = re.compile(r" — | - ")
 PLAN_COLUMN = "Plan"
@@ -115,14 +117,14 @@ class Card:
     id: int
     title: str
     project_id: int
-    labels: tuple[Label, ...] = ()
-    blockers: tuple[Blocker, ...] = ()
-    url: str = ""
+    labels: tuple[Label, ...]
+    blockers: tuple[Blocker, ...]
+    url: str
 
     @property
     def blocked(self) -> bool:
         """True when a `blocked` label is set or any blocker is still unfinished."""
-        if any(label.title.strip().casefold() == "blocked" for label in self.labels):
+        if any(label.title.strip().casefold() == BLOCKED for label in self.labels):
             return True
         return any(not blocker.done for blocker in self.blockers)
 
@@ -136,22 +138,24 @@ class Project:
     slug: str
 
 
-def project_slug(title: str) -> str:
+def project_slug(title: str, fallback: str = DEFAULT_SLUG) -> str:
     """Derive the slug of a project from its title.
 
     The slug is the part of the title before the first ` — ` or ` - ` separator, lowercased, with
     non-ASCII characters dropped and every run of other characters replaced by one dash; leading
-    and trailing dashes are removed. A title with nothing usable yields the fallback `project`.
+    and trailing dashes are removed. A title with nothing usable yields `fallback`.
 
     Args:
         title: The project title as the board shows it, e.g. `cascade-rig — отладка`.
+        fallback: What a title with nothing usable becomes; `projects()` passes `project-<id>` so
+            such a project stays addressable.
 
     Returns:
         A lowercase ASCII slug matching `[a-z0-9]([a-z0-9-]*[a-z0-9])?`, never empty.
     """
     head = DASH_SPLIT.split(title, maxsplit=1)[0]
     slug = re.sub(r"[^a-z0-9]+", "-", head.casefold()).strip("-")
-    return slug or DEFAULT_SLUG
+    return slug or fallback
 
 
 def _text(value: Any) -> str:
@@ -173,9 +177,7 @@ def _narrow_labels(payload: Any) -> tuple[Label, ...]:
     if not isinstance(payload, list):
         return ()
     return tuple(
-        Label(_text(label.get("title")), _text(label.get("hex_color")))
-        for label in payload
-        if isinstance(label, dict)
+        Label(_text(label.get("title")), _text(label.get("hex_color"))) for label in payload if isinstance(label, dict)
     )
 
 
@@ -219,10 +221,9 @@ class VikunjaClient:
         self.base_url = (base_url or os.environ.get("VIKUNJA_URL") or creds.get("base") or "").rstrip("/")
         if not self.base_url:
             raise VikunjaConfigError(
-                "no Vikunja address: set VIKUNJA_URL, pass base_url, or add `base` to "
-                f"{creds_path or CREDS_PATH}"
+                f"no Vikunja address: set VIKUNJA_URL, pass base_url, or add `base` to {creds_path or CREDS_PATH}"
             )
-        self._transport = transport or UrllibTransport()
+        self._transport = transport or UrllibTransport(self.base_url)
         self._token = token or os.environ.get("VIKUNJA_TOKEN") or ""
         if not self._token:
             username, password = creds.get("username", ""), creds.get("password", "")
@@ -243,8 +244,11 @@ class VikunjaClient:
             raise VikunjaConfigError(f"login at {LOGIN_PATH} returned no token; check the credentials file")
         return token
 
-    def request(self, method: str, path: str, body: Any = None) -> Any:
+    def _request(self, method: str, path: str, body: Any = None) -> Any:
         """Send one request and return the decoded payload, or raise `VikunjaHTTPError`.
+
+        Private so read-only stays a property: there is no call on the public surface that takes a
+        method, only the named reads (`projects`, `plan_cards`), none of which can write.
 
         Args:
             method: The HTTP method, e.g. `GET`.
@@ -265,26 +269,39 @@ class VikunjaClient:
     def projects(self) -> list[Project]:
         """List the non-archived projects with slugs derived from their titles.
 
+        Every page of the board's project list is read, the way the cards are paged, so a project
+        is not silently lost to the page size. A page ends the walk when it brings no project whose
+        id was not collected already.
+
         Returns:
-            The projects in board order. A duplicate slug gets the project id appended (`project-9`).
+            The projects in board order. A duplicate slug gets the project id appended (`project-9`),
+            and so does a title that derives no slug of its own.
 
         Raises:
             VikunjaHTTPError: When the board answers with an error status.
         """
-        seen: set[str] = set()
+        seen_ids: set[int] = set()
+        seen_slugs: set[str] = set()
         out: list[Project] = []
-        for payload in self.request("GET", "/projects") or []:
-            if not isinstance(payload, dict) or payload.get("is_archived"):
-                continue
-            pid = _int(payload.get("id"))
-            if pid is None:
-                continue
-            title = _text(payload.get("title"))
-            slug = project_slug(title)
-            if slug in seen:
-                slug = f"{slug}-{pid}"
-            seen.add(slug)
-            out.append(Project(pid, title, slug))
+        for page in range(1, 101):
+            payloads = self._request("GET", f"/projects?page={page}&per_page=100") or []
+            fresh = 0
+            for payload in payloads if isinstance(payloads, list) else []:
+                if not isinstance(payload, dict) or payload.get("is_archived"):
+                    continue
+                pid = _int(payload.get("id"))
+                if pid is None or pid in seen_ids:
+                    continue
+                seen_ids.add(pid)
+                fresh += 1
+                title = _text(payload.get("title"))
+                slug = project_slug(title, fallback=f"project-{pid}")
+                if slug in seen_slugs:
+                    slug = f"{slug}-{pid}"
+                seen_slugs.add(slug)
+                out.append(Project(pid, title, slug))
+            if not fresh:
+                break
         return out
 
     def project(self, ref: str | int) -> Project:
@@ -331,10 +348,8 @@ class VikunjaClient:
             VikunjaError: When the project has no kanban view or the view has no `Plan` column.
         """
         pid = self.project(project).id
-        views = self.request("GET", f"/projects/{pid}/views") or []
-        kanban = next(
-            (view for view in views if isinstance(view, dict) and view.get("view_kind") == "kanban"), None
-        )
+        views = self._request("GET", f"/projects/{pid}/views") or []
+        kanban = next((view for view in views if isinstance(view, dict) and view.get("view_kind") == "kanban"), None)
         if kanban is None:
             names = ", ".join(sorted(_text(view.get("title")) for view in views if isinstance(view, dict)))
             raise VikunjaError(f"project {pid} has no kanban view; views on the board: {names or 'none'}")
@@ -350,7 +365,7 @@ class VikunjaClient:
         plan_exists = False
         out: list[Card] = []
         for page in range(1, 101):
-            buckets = self.request("GET", f"/projects/{pid}/views/{view_id}/tasks?per_page=100&page={page}")
+            buckets = self._request("GET", f"/projects/{pid}/views/{view_id}/tasks?per_page=100&page={page}")
             fresh = 0
             for bucket in buckets if isinstance(buckets, list) else []:
                 if not isinstance(bucket, dict):
@@ -373,7 +388,9 @@ class VikunjaClient:
             if not fresh:
                 break
         if not plan_exists:
-            raise VikunjaError(f"project {pid} has no {PLAN_COLUMN!r} column; columns on the board: {', '.join(columns) or 'none'}")
+            raise VikunjaError(
+                f"project {pid} has no {PLAN_COLUMN!r} column; columns on the board: {', '.join(columns) or 'none'}"
+            )
         return out
 
     def _card(self, pid: int, payload: dict[str, Any], web_base: str) -> Card:
@@ -399,13 +416,21 @@ def _read_creds(path: Path) -> dict[str, Any]:
 
 
 def main(argv: list[str] | None = None) -> int:
-    """Print the plan cards of one project; the operator's smoke check of the configuration."""
+    """Print the plan cards of one project; the operator's smoke check of the configuration.
+
+    Returns:
+        The exit code: 0 when the board answered, 1 when it did not. The error is one `ERROR:`
+        line on stderr, not a traceback.
+    """
     parser = argparse.ArgumentParser(description="Show the cards of the Plan column of one project.")
     parser.add_argument("--project", default="cascade-rig", help="project slug or id (default: cascade-rig)")
     parser.add_argument("--json", action="store_true", help="print JSON instead of one line per card")
     args = parser.parse_args(argv)
-    client = VikunjaClient()
-    cards = client.plan_cards(args.project)
+    try:
+        cards = VikunjaClient().plan_cards(args.project)
+    except VikunjaError as error:
+        print(f"ERROR: {error}", file=sys.stderr)
+        return 1
     if args.json:
         print(
             json.dumps(
@@ -427,7 +452,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     for card in cards:
         names = ", ".join(label.title for label in card.labels)
-        state = "blocked" if card.blocked else "free"
+        state = BLOCKED if card.blocked else "free"
         print(f"#{card.id} [{state}] {card.title} ({names})" if names else f"#{card.id} [{state}] {card.title}")
     return 0
 
