@@ -207,6 +207,29 @@ def record_usage(slug: str, role: str, model: str, usage: dict) -> None:
     subprocess.run(cmd, capture_output=True, text=True)
 
 
+def list_prices(model: str) -> dict[str, float] | None:
+    """OpenRouter list prices for one model, per token, or None when the cache has no entry.
+
+    The run budget (`max_budget_per_run`) is compared against the prices the runtime knows. When the
+    runtime prices a route with the local gateway's overrides — 30-70x the list price — a cheap run
+    looks expensive and is killed mid-work: a real architect run that cost $0.009 was aborted at
+    "$2.33 of $2.00". Handing the runtime the list price makes the budget mean money.
+    """
+    cache = STATE / "pricing-openrouter.json"
+    if not cache.exists():
+        return None
+    try:
+        models = json.loads(cache.read_text(encoding="utf-8")).get("models") or {}
+    except json.JSONDecodeError:
+        return None
+    candidates = [model, model.removeprefix("openai/"), model.removeprefix("~")]
+    for name in candidates:
+        entry = models.get(name)
+        if entry:
+            return {"in": float(entry["in"]) / 1e6, "out": float(entry["out"]) / 1e6}
+    return None
+
+
 def build_agent(cfg: dict, role: str, model: str, system_prompt: str):
     from openhands.sdk import LLM, Agent, Tool
     from openhands.tools.file_editor import FileEditorTool
@@ -235,6 +258,15 @@ def build_agent(cfg: dict, role: str, model: str, system_prompt: str):
             print(f"note: tool {name} unavailable: {exc}", file=sys.stderr)
 
     llm_model = model if model.startswith("openai/") else f"openai/{model}"
+    prices = list_prices(model)
+    if prices is None:
+        # Without a known price the runtime counts the run as free and the budget never trips;
+        # say so rather than let a dead cap look like a live one.
+        print(
+            f"note: no OpenRouter price for {model}; the run budget is not enforced in money — "
+            f"run bin/prices_openrouter.py --refresh",
+            file=sys.stderr,
+        )
     llm = LLM(
         model=llm_model,
         base_url=cfg["base_url"],
@@ -242,6 +274,8 @@ def build_agent(cfg: dict, role: str, model: str, system_prompt: str):
         usage_id=f"cascade-{role}",
         temperature=cfg["temperature"],
         max_output_tokens=cfg["max_tokens"],
+        input_cost_per_token=prices["in"] if prices else None,
+        output_cost_per_token=prices["out"] if prices else None,
     )
     # system_message_suffix is APPENDED to the built-in prompt, which carries the tool protocol.
     # Passing system_prompt= instead replaces that protocol and the model stops calling tools.
