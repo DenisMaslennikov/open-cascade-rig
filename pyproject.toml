@@ -36,6 +36,9 @@ ignore = ["S101"]  # asserts are the point of a test
 # A real defect found by this gate, not fixed here: the fix belongs to a card that the cascade runs
 # (AGENTS.md rule 10). Card #182 owns it; delete this line in the pull request that fixes `brief`.
 "bin/schema_design.py" = ["F821", "B007", "E741"]
+# tools/board talks to Vikunja and GitHub over urllib and calls `gh`: the URL is built from config,
+# not from user input, so S310/S603/S607 are by-design here rather than debt.
+"tools/**" = ["S310", "S603", "S607"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

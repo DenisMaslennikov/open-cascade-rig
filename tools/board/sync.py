@@ -66,14 +66,10 @@ def check_title(title: str) -> list[str]:
     problems: list[str] = []
     refs = CARD_ANYWHERE.findall(title or "")
     if not CARD_AT_START.match(title or ""):
-        problems.append(
-            "title must start with the card reference, e.g. `[#18] s0-t4: implant bonuses`"
-        )
+        problems.append("title must start with the card reference, e.g. `[#18] s0-t4: implant bonuses`")
     if len(refs) != 1:
         found = ", ".join(f"#{r}" for r in refs) or "none"
-        problems.append(
-            f"title must name exactly one card, found {len(refs)} ({found})"
-        )
+        problems.append(f"title must name exactly one card, found {len(refs)} ({found})")
     return problems
 
 
@@ -89,9 +85,7 @@ def pr_state(pr: dict) -> str:
     return "open" if str(pr.get("state", "")).lower() == "open" else "closed"
 
 
-def link_prs(
-    prs: list[dict], cards: dict[int, dict]
-) -> tuple[dict[int, dict], list[str]]:
+def link_prs(prs: list[dict], cards: dict[int, dict]) -> tuple[dict[int, dict], list[str]]:
     """card id → the newest pull request that names it, plus everything suspicious."""
     linked: dict[int, dict] = {}
     warnings: list[str] = []
@@ -101,9 +95,7 @@ def link_prs(
         if cid is None:
             continue
         if cid not in cards:
-            warnings.append(
-                f"PR #{pr['number']} names card #{cid}, which does not exist"
-            )
+            warnings.append(f"PR #{pr['number']} names card #{cid}, which does not exist")
             continue
         if pr_state(pr) == "open":
             open_by_card.setdefault(cid, []).append(int(pr["number"]))
@@ -112,9 +104,7 @@ def link_prs(
             linked[cid] = pr
     for cid, numbers in open_by_card.items():
         if len(numbers) > 1:
-            warnings.append(
-                f"card #{cid} has several open PRs ({sorted(numbers)}), the newest wins"
-            )
+            warnings.append(f"card #{cid} has several open PRs ({sorted(numbers)}), the newest wins")
     return linked, warnings
 
 
@@ -167,11 +157,7 @@ def desired_state(
             act(cid, done_column, "pr-merged", number, set_done=True)
         elif state == "open" and not done[cid]:
             act(cid, policy["review_column"], "pr-open", number)
-        elif (
-            state == "closed"
-            and not done[cid]
-            and column[cid] == policy["review_column"]
-        ):
+        elif state == "closed" and not done[cid] and column[cid] == policy["review_column"]:
             act(cid, plan_column, "pr-closed", number)
 
     # 2. A card flagged done belongs in Done, whatever moved it.
@@ -182,8 +168,7 @@ def desired_state(
     # 3. Refill Plan with unblocked Backlog cards, in order.
     free = max(
         0,
-        int(policy["max_plan"])
-        - sum(1 for cid in column if column[cid] == plan_column),
+        int(policy["max_plan"]) - sum(1 for cid in column if column[cid] == plan_column),
     )
     queue: list[int] = []
     for cid in sorted(cards):
@@ -211,9 +196,7 @@ def desired_state(
 class Vikunja:
     """The four calls this sync needs; nothing else from the board adapter is imported."""
 
-    def __init__(
-        self, base: str, project_id: int, view_id: int, token: str | None = None
-    ):
+    def __init__(self, base: str, project_id: int, view_id: int, token: str | None = None):
         self.base = base.rstrip("/")
         self.project_id = project_id
         self.view_id = view_id
@@ -246,16 +229,12 @@ class Vikunja:
                 raw = response.read().decode()
                 return response.status, (json.loads(raw) if raw.strip() else {})
         except urllib.error.HTTPError as error:
-            raise SystemExit(
-                f"{method} {path} -> {error.code}: {error.read().decode()[:300]}"
-            )
+            raise SystemExit(f"{method} {path} -> {error.code}: {error.read().decode()[:300]}") from error
 
     def cards(self) -> dict[int, dict]:
         out: dict[int, dict] = {}
         for page in range(1, 41):
-            _, chunk = self._raw(
-                "GET", f"/projects/{self.project_id}/tasks?per_page=50&page={page}"
-            )
+            _, chunk = self._raw("GET", f"/projects/{self.project_id}/tasks?per_page=50&page={page}")
             for card in chunk or []:
                 out[int(card["id"])] = card
             if len(chunk or []) < 50:
@@ -281,12 +260,7 @@ class Vikunja:
         return out
 
     def move(self, card_id: int, column: str) -> None:
-        buckets = (
-            self._raw(
-                "GET", f"/projects/{self.project_id}/views/{self.view_id}/buckets"
-            )[1]
-            or []
-        )
+        buckets = self._raw("GET", f"/projects/{self.project_id}/views/{self.view_id}/buckets")[1] or []
         by_title = {bucket["title"]: bucket["id"] for bucket in buckets}
         if column not in by_title:
             raise SystemExit(f"no column {column!r}; have {sorted(by_title)}")
@@ -320,9 +294,7 @@ def fetch_prs(repo: str, token: str | None, limit: int) -> list[dict]:
                 with urllib.request.urlopen(request, timeout=30) as response:
                     chunk = json.loads(response.read().decode() or "[]")
             except urllib.error.HTTPError as error:
-                raise SystemExit(
-                    f"GitHub API -> {error.code}: {error.read().decode()[:300]}"
-                )
+                raise SystemExit(f"GitHub API -> {error.code}: {error.read().decode()[:300]}") from error
             if not chunk:
                 break
             prs.extend(chunk)
@@ -359,11 +331,7 @@ def render(actions: list[dict], warnings: list[str], cards: dict[int, dict]) -> 
     for action in actions:
         cid = action["card"]
         title = cards.get(cid, {}).get("title", "")[:64]
-        arrow = (
-            f"{action['from']} → {action['to']}"
-            if action["from"] != action["to"]
-            else action["to"]
-        )
+        arrow = f"{action['from']} → {action['to']}" if action["from"] != action["to"] else action["to"]
         detail = action["reason"]
         if action.get("pr"):
             detail += f" PR #{action['pr']}"
@@ -389,33 +357,23 @@ def publish_report(actions: list[dict], cards: dict[int, dict]) -> None:
                 f"| #{action['card']} | {action['from']} → {action['to']} | {action['reason']} | "
                 f"{cards.get(action['card'], {}).get('title', '')[:80]} |"
             )
-        Path(summary).write_text(
-            "### Board sync\n\n" + "\n".join(rows) + "\n", encoding="utf-8"
-        )
+        Path(summary).write_text("### Board sync\n\n" + "\n".join(rows) + "\n", encoding="utf-8")
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description="Keep the Vikunja board in step with GitHub pull requests, deterministically."
     )
-    parser.add_argument(
-        "--policy", default=str(Path(__file__).with_name("policy.json"))
-    )
+    parser.add_argument("--policy", default=str(Path(__file__).with_name("policy.json")))
     parser.add_argument("--repo", help="owner/name; defaults to $GITHUB_REPOSITORY")
     parser.add_argument(
         "--apply",
         action="store_true",
         help="write changes; without it this is a dry run",
     )
-    parser.add_argument(
-        "--json", action="store_true", help="machine-readable report on stdout"
-    )
-    parser.add_argument(
-        "--check-title", metavar="TITLE", help="validate one PR title and exit"
-    )
-    parser.add_argument(
-        "--prs-file", help="read pull requests from a JSON file instead of GitHub"
-    )
+    parser.add_argument("--json", action="store_true", help="machine-readable report on stdout")
+    parser.add_argument("--check-title", metavar="TITLE", help="validate one PR title and exit")
+    parser.add_argument("--prs-file", help="read pull requests from a JSON file instead of GitHub")
     args = parser.parse_args(argv)
 
     if args.check_title is not None:
@@ -482,11 +440,7 @@ def main(argv: list[str] | None = None) -> int:
 
     publish_report(actions, cards)
     if args.json:
-        print(
-            json.dumps(
-                {"applied": actions, "warnings": warnings}, ensure_ascii=False, indent=1
-            )
-        )
+        print(json.dumps({"applied": actions, "warnings": warnings}, ensure_ascii=False, indent=1))
     if warnings and not actions:
         print(render([], warnings, cards))
     return 0
