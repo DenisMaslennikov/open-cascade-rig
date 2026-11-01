@@ -10,7 +10,7 @@ path (`tools.wrapper.<module>`) with the repository root on `sys.path`.
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass, replace
 from typing import Any
 
 from tools.wrapper.sessions_store import SessionRow
@@ -56,6 +56,20 @@ class CardView:
     url: str
 
 
+def _recency(row: SessionRow) -> tuple[bool, float]:
+    """Rank a session row for the rail list: dated rows first, newest moment first.
+
+    Arguments:
+        row: The session row to rank.
+
+    Returns:
+        `(True, 0.0)` for a session without a message, otherwise `(False, -last_message_at)`.
+    """
+    if row.last_message_at is None:
+        return (True, 0.0)
+    return (False, -row.last_message_at)
+
+
 def sort_sessions(rows: Sequence[SessionRow]) -> list[SessionRow]:
     """Order sessions the way the rail list shows them.
 
@@ -68,7 +82,10 @@ def sort_sessions(rows: Sequence[SessionRow]) -> list[SessionRow]:
     Returns:
         A new list holding the same rows in rail order.
     """
-    raise NotImplementedError
+    # The id order is settled first and the stable second pass keeps it for equal recency keys,
+    # which is how ties end up ordered by id descending without a second sort key.
+    by_id_descending = sorted(rows, key=lambda row: row.id, reverse=True)
+    return sorted(by_id_descending, key=_recency)
 
 
 def mark_unread(rows: Sequence[SessionRow], seen: Mapping[str, float]) -> list[SessionView]:
@@ -88,7 +105,17 @@ def mark_unread(rows: Sequence[SessionRow], seen: Mapping[str, float]) -> list[S
     Returns:
         One view per row, in the order of `rows`.
     """
-    raise NotImplementedError
+    return [
+        SessionView(
+            id=row.id,
+            title=row.title,
+            last_message_at=row.last_message_at,
+            running=row.running,
+            unread=row.last_message_at is not None and row.last_message_at > seen.get(row.id, 0.0),
+            relative="",
+        )
+        for row in rows
+    ]
 
 
 def rail_counters(cards: Sequence[CardView], sessions: Sequence[SessionView]) -> dict[str, int]:
@@ -102,7 +129,61 @@ def rail_counters(cards: Sequence[CardView], sessions: Sequence[SessionView]) ->
         `{"cards": len(cards), "sessions": <number of running sessions>, "unread": <number of unread
         sessions>}`.
     """
-    raise NotImplementedError
+    return {
+        "cards": len(cards),
+        "sessions": sum(1 for view in sessions if view.running),
+        "unread": sum(1 for view in sessions if view.unread),
+    }
+
+
+_UNIT_LABELS: dict[str, tuple[str, str, str, str]] = {
+    "en": ("now", "min", "h", "d"),
+    "ru": ("сейчас", "мин", "ч", "д"),
+}
+
+
+def _unit_labels(lang: str) -> tuple[str, str, str, str]:
+    """Return the age words of a rail language as (now, minute, hour, day).
+
+    Arguments:
+        lang: The rail language, `en` or `ru`.
+
+    Returns:
+        The four words in the order the renderer uses them.
+
+    Raises:
+        ValueError: `lang` is neither `en` nor `ru`.
+    """
+    labels = _UNIT_LABELS.get(lang)
+    if labels is None:
+        raise ValueError(f"unknown rail language: {lang!r}")
+    return labels
+
+
+def _relative_age(labels: tuple[str, str, str, str], timestamp: float | None, now: float) -> str:
+    """Render one age with the words of a language already resolved.
+
+    Arguments:
+        labels: The age words of the language, as `_unit_labels` returns them.
+        timestamp: Epoch seconds of the message, or None when there is no message.
+        now: The current time in epoch seconds.
+
+    Returns:
+        The formatted age, or the word for "now" when the timestamp is None or in the future.
+    """
+    now_word, minute, hour, day = labels
+    if timestamp is None:
+        return now_word
+    seconds = now - timestamp
+    if seconds < 60:  # a future timestamp lands here too: its negative delta is under a minute
+        return now_word
+    minutes = int(seconds // 60)
+    if minutes < 60:
+        return f"{minutes} {minute}"
+    hours = minutes // 60
+    if hours < 24:
+        return f"{hours} {hour}"
+    return f"{hours // 24} {day}"
 
 
 def format_relative(timestamp: float | None, now: float, lang: str) -> str:
@@ -123,7 +204,7 @@ def format_relative(timestamp: float | None, now: float, lang: str) -> str:
     Raises:
         ValueError: `lang` is neither `en` nor `ru`.
     """
-    raise NotImplementedError
+    return _relative_age(_unit_labels(lang), timestamp, now)
 
 
 def rail_payload(
@@ -153,4 +234,22 @@ def rail_payload(
     Raises:
         ValueError: `lang` is neither `en` nor `ru`.
     """
-    raise NotImplementedError
+    labels = _unit_labels(lang)
+    ordered = [
+        replace(item, relative=_relative_age(labels, item.last_message_at, now))
+        for item in mark_unread(sort_sessions(sessions), seen)
+    ]
+    return {
+        "cards": [
+            {
+                "id": item.id,
+                "title": item.title,
+                "labels": [list(label) for label in item.labels],
+                "blocked": item.blocked,
+                "url": item.url,
+            }
+            for item in cards
+        ],
+        "sessions": [asdict(item) for item in ordered],
+        "counters": rail_counters(cards, ordered),
+    }
