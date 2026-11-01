@@ -302,13 +302,15 @@ class VikunjaClient:
             path = f"/projects?page={page}&per_page=100"
             fresh = 0
             for payload in _require_list(self._request("GET", path), path):
-                if not isinstance(payload, dict) or payload.get("is_archived"):
+                if not isinstance(payload, dict):
                     continue
                 pid = _int(payload.get("id"))
                 if pid is None or pid in seen_ids:
                     continue
                 seen_ids.add(pid)
                 fresh += 1
+                if payload.get("is_archived"):
+                    continue
                 title = _text(payload.get("title"))
                 slug = project_slug(title, fallback=f"project-{pid}")
                 if slug in seen_slugs:
