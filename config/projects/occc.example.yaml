@@ -15,7 +15,10 @@ models:
   architect: ~z-ai/glm-latest
   # Called by the human only, for architect-level arbitration: the strongest model available.
   chief_architect: ~anthropic/claude-opus-latest
-  specifier: ~z-ai/glm-latest
+  # Freezes tests and stubs against a written contract: mechanical work on a closed spec, so a cheap
+  # model is enough — provided it can run the acceptance command until the tests are red for the right
+  # reason. glm-latest did it well but cost more than the work is worth.
+  specifier: ~deepseek/deepseek-v4-flash-latest
   # Screenshots are its working input, so it is the one role that must see images.
   designer: ~anthropic/claude-sonnet-latest
   # Writes code until the frozen tests pass: cheap, and observed to actually write and finish.
