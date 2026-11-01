@@ -207,6 +207,37 @@ def record_usage(slug: str, role: str, model: str, usage: dict) -> None:
     subprocess.run(cmd, capture_output=True, text=True)
 
 
+def gateway_prices(model: str) -> dict[str, float] | None:
+    """The gateway's price per token for one model, from its own /model/info cache."""
+    cache = CONFIG / "pricing.json"
+    if not cache.exists():
+        return None
+    try:
+        entry = (json.loads(cache.read_text(encoding="utf-8")) or {}).get(model)
+    except json.JSONDecodeError:
+        return None
+    if not entry:
+        return None
+    return {"in": float(entry.get("in") or 0.0), "out": float(entry.get("out") or 0.0)}
+
+
+def budget_scale(model: str) -> float:
+    """How many gateway-currency units one list-price unit buys, for this model.
+
+    The runtime compares `max_budget_per_run` against what *it* thinks the tokens cost, and what it thinks
+    comes from the gateway, whose overrides are 30-70x the list price. A budget written in the owner's
+    money therefore has to be scaled, or a cents-long run is killed as if it were a dollar-long one: an
+    architect run that cost $0.009 of list price died at "accumulated $2.3351 of $2.0000".
+
+    Returns 1.0 when either price is unknown: an unscaled budget is the old behaviour, which is wrong but
+    loud, rather than a silently generous cap.
+    """
+    listed, billed = list_prices(model), gateway_prices(model)
+    if not listed or not billed or not listed["in"] or not listed["out"]:
+        return 1.0
+    return max(billed["in"] / listed["in"], billed["out"] / listed["out"])
+
+
 def list_prices(model: str) -> dict[str, float] | None:
     """OpenRouter list prices for one model, per token, or None when the cache has no entry.
 
@@ -403,8 +434,18 @@ def main() -> int:
     agent = build_agent(cfg, args.role, model, system_prompt)
     from openhands.sdk import Conversation
 
+    scale = budget_scale(model)
+    budget = args.budget * scale
+    if scale == 1.0:
+        print("note: no price pair for this model; the run budget stays in gateway currency", file=sys.stderr)
+    else:
+        print(
+            f"note: run budget {args.budget:.4g} list-prices = {budget:.4g} gateway units "
+            f"(gateway prices are {scale:.0f}x list for {model})",
+            file=sys.stderr,
+        )
     conversation = Conversation(
-        agent=agent, workspace=str(worktree), max_iteration_per_run=args.iterations, max_budget_per_run=args.budget
+        agent=agent, workspace=str(worktree), max_iteration_per_run=args.iterations, max_budget_per_run=budget
     )
 
     def on_timeout(signum, frame):
