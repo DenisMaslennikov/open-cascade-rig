@@ -1,0 +1,5 @@
+# Development tools, deliberately few. The same set the product repository uses, minus the frontend.
+pytest>=8
+hypothesis>=6
+mutmut>=3
+ruff>=0.9

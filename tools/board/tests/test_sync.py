@@ -90,9 +90,7 @@ class CheckTitle(unittest.TestCase):
 class Link(unittest.TestCase):
     def test_newest_pull_request_wins(self):
         cards = {18: card(18)}
-        linked, _ = sync.link_prs(
-            [pr(9, "[#18] a", "closed", merged=True), pr(11, "[#18] b")], cards
-        )
+        linked, _ = sync.link_prs([pr(9, "[#18] a", "closed", merged=True), pr(11, "[#18] b")], cards)
         self.assertEqual(linked[18]["number"], 11)
 
     def test_unknown_card_is_reported(self):
@@ -105,9 +103,7 @@ class Link(unittest.TestCase):
         self.assertEqual((linked, warnings), ({}, []))
 
     def test_two_open_pull_requests_for_one_card_warn(self):
-        _, warnings = sync.link_prs(
-            [pr(9, "[#18] a"), pr(10, "[#18] b")], {18: card(18)}
-        )
+        _, warnings = sync.link_prs([pr(9, "[#18] a"), pr(10, "[#18] b")], {18: card(18)})
         self.assertTrue(any("several open PRs" in w for w in warnings))
 
 
@@ -122,18 +118,14 @@ class Rules(unittest.TestCase):
 
     def test_merged_pull_request_finishes_the_card(self):
         cards = {18: card(18)}
-        actions, _ = sync.desired_state(
-            cards, {18: "Review"}, [pr(9, "[#18] a", "closed", merged=True)], POLICY
-        )
+        actions, _ = sync.desired_state(cards, {18: "Review"}, [pr(9, "[#18] a", "closed", merged=True)], POLICY)
         self.assertEqual(len(actions), 1)
         self.assertTrue(actions[0]["set_done"])
         self.assertEqual(actions[0]["to"], "Done")
 
     def test_closed_unmerged_pull_request_returns_the_card_to_plan(self):
         cards = {18: card(18)}
-        actions, _ = sync.desired_state(
-            cards, {18: "Review"}, [pr(9, "[#18] a", "closed")], POLICY
-        )
+        actions, _ = sync.desired_state(cards, {18: "Review"}, [pr(9, "[#18] a", "closed")], POLICY)
         self.assertEqual([a["to"] for a in actions], ["Plan"])
 
     def test_done_card_out_of_done_is_put_back(self):
@@ -165,9 +157,7 @@ class Rules(unittest.TestCase):
 
     def test_priority_then_id_decides_the_order(self):
         cards = {5: card(5), 3: card(3, priority=4), 1: card(1)}
-        actions, _ = sync.desired_state(
-            cards, {5: "Backlog", 3: "Backlog", 1: "Backlog"}, [], POLICY
-        )
+        actions, _ = sync.desired_state(cards, {5: "Backlog", 3: "Backlog", 1: "Backlog"}, [], POLICY)
         self.assertEqual([a["card"] for a in actions], [3, 1, 5])
 
     def test_max_plan_caps_the_queue(self):
@@ -195,17 +185,13 @@ class Rules(unittest.TestCase):
         columns = {1: "Review", 2: "Review", 3: "Plan", 4: "Plan", 5: "Plan"}
         for cid in (3, 4, 5):
             cards[cid] = card(cid)
-        actions, _ = sync.desired_state(
-            cards, columns, [pr(9, "[#2] b", "closed", merged=True)], POLICY
-        )
+        actions, _ = sync.desired_state(cards, columns, [pr(9, "[#2] b", "closed", merged=True)], POLICY)
         self.assertIn((2, "Done"), [(a["card"], a["to"]) for a in actions])
 
     def test_nothing_to_do_means_no_actions(self):
         cards = {1: card(1, done=True), 2: card(2)}
         columns = {1: "Done", 2: "Review"}
-        actions, warnings = sync.desired_state(
-            cards, columns, [pr(9, "[#2] b")], POLICY
-        )
+        actions, warnings = sync.desired_state(cards, columns, [pr(9, "[#2] b")], POLICY)
         self.assertEqual((actions, warnings), ([], []))
 
     def test_apply_is_idempotent(self):

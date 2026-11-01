@@ -20,6 +20,7 @@ CLI:
 
 Output: JSON. Exit 0 — ок (для --gate: 0 — карточку брать можно), 1 — сбой или заблокирована.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -65,8 +66,7 @@ def column_map(b) -> dict[int, str]:
     """task_id -> column title, walking pages: the view endpoint caps a column at 50 per page."""
     out: dict[int, str] = {}
     for page in range(1, 20):
-        _, buckets = b._call(
-            "GET", f"/projects/{b.project_id}/views/{b.view_id}/tasks?per_page=200&page={page}")
+        _, buckets = b._call("GET", f"/projects/{b.project_id}/views/{b.view_id}/tasks?per_page=200&page={page}")
         fresh = 0
         for bucket in buckets:
             for task in bucket.get("tasks") or []:
@@ -80,9 +80,11 @@ def column_map(b) -> dict[int, str]:
 
 def gh_prs(repo: Path) -> list[dict]:
     proc = subprocess.run(
-        ["gh", "pr", "list", "--state", "all", "--limit", "200",
-         "--json", "number,title,state,headRefName,mergedAt"],
-        cwd=repo, capture_output=True, text=True)
+        ["gh", "pr", "list", "--state", "all", "--limit", "200", "--json", "number,title,state,headRefName,mergedAt"],
+        cwd=repo,
+        capture_output=True,
+        text=True,
+    )
     if proc.returncode != 0:
         raise SystemExit(f"gh pr list failed: {proc.stderr.strip()[:300]}")
     return json.loads(proc.stdout or "[]")
@@ -136,13 +138,16 @@ def main() -> int:
         if card is None:
             print(json.dumps({"ok": False, "error": f"нет карточки {args.gate}"}, ensure_ascii=False))
             return 1
-        open_blockers = [i for i in blockers_of(card)
-                         if i in cards and not cards[i].get("done")]
-        report = {"card": args.gate, "title": card["title"][:80],
-                  "column": columns.get(args.gate, "<none>"),
-                  "blocked_by": [{"id": i, "title": cards[i]["title"][:60],
-                                  "column": columns.get(i, "<none>")} for i in open_blockers],
-                  "takeable": not open_blockers}
+        open_blockers = [i for i in blockers_of(card) if i in cards and not cards[i].get("done")]
+        report = {
+            "card": args.gate,
+            "title": card["title"][:80],
+            "column": columns.get(args.gate, "<none>"),
+            "blocked_by": [
+                {"id": i, "title": cards[i]["title"][:60], "column": columns.get(i, "<none>")} for i in open_blockers
+            ],
+            "takeable": not open_blockers,
+        }
         print(json.dumps(report, ensure_ascii=False, indent=1))
         return 1 if open_blockers else 0
 
@@ -178,13 +183,16 @@ def main() -> int:
             if args.apply:
                 b.move(cid, "Plan")
 
-    report = {"project": args.project, "applied": args.apply, "actions": actions,
-              "open_prs": len([p for p in prs if p["state"] == "OPEN"]),
-              "linked_cards": len(linked)}
+    report = {
+        "project": args.project,
+        "applied": args.apply,
+        "actions": actions,
+        "open_prs": len([p for p in prs if p["state"] == "OPEN"]),
+        "linked_cards": len(linked),
+    }
     if args.apply and actions:
         after = column_map(b)
-        report["verify"] = {"columns": {c: list(after.values()).count(c)
-                                        for c in set(after.values())}}
+        report["verify"] = {"columns": {c: list(after.values()).count(c) for c in set(after.values())}}
     print(json.dumps(report, ensure_ascii=False, indent=1))
     return 0
 

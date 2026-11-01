@@ -21,6 +21,7 @@ Exit codes:
   0 — a valid roadmap was produced and written
   1 — the run failed (gateway error, bad input, invalid roadmap)
 """
+
 from __future__ import annotations
 
 import argparse
@@ -28,16 +29,14 @@ import json
 import os
 import subprocess
 import sys
-import time
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 BIN = Path(__file__).resolve().parent
 sys.path.insert(0, str(BIN))
 
 from plan_task import (  # noqa: E402  — the gateway plumbing lives in one place
-    CONFIG,
     HOUSE_RULES,
     STATE,
     call_model,
@@ -48,7 +47,8 @@ from plan_task import (  # noqa: E402  — the gateway plumbing lives in one pla
 
 MAX_REQUEST_CHARS = 30000
 
-OUTLINE_PROMPT = """You are the architect of an automated development pipeline. You are not
+OUTLINE_PROMPT = (
+    """You are the architect of an automated development pipeline. You are not
 writing code and not writing a detailed implementation plan: you are laying out the
 development roadmap of a product as stages, ordered so that the first tasks are the easiest
 possible to debug a multi-agent pipeline on and the last ones are the hardest and most
@@ -88,9 +88,12 @@ Rules:
   owner can see and use, or with data the next stage needs.
 
 Write all human-facing text in RUSSIAN (the owner reads Russian); keep code identifiers,
-ESI scope names and technology names in English.""" + HOUSE_RULES
+ESI scope names and technology names in English."""
+    + HOUSE_RULES
+)
 
-STAGE_PROMPT = """You are the architect of an automated development pipeline, expanding one
+STAGE_PROMPT = (
+    """You are the architect of an automated development pipeline, expanding one
 stage of a product roadmap into detailed but GENERAL tasks — cards for a kanban board, not
 subtask-level implementation plans. A card says what to build, why, what is in and out of
 scope, what observable result proves it, and what it depends on. It does not name functions,
@@ -127,7 +130,9 @@ Rules:
 - If a fact constrains the task (ESI cannot place market orders, corporation endpoints need a
   corporation role, licensing forbids shipping CCP data), put it in `risks` or `scope`.
 - depends_on may reference tasks of earlier stages; never the same stage after this one.
-- Write in RUSSIAN; code identifiers, ESI scopes and technology names stay in English.""" + HOUSE_RULES
+- Write in RUSSIAN; code identifiers, ESI scopes and technology names stay in English."""
+    + HOUSE_RULES
+)
 
 
 def load_request(value: str) -> str:
@@ -147,12 +152,25 @@ def record(cfg: dict, usage: dict, feature: str, task_id: str) -> None:
     if os.environ.get("ROADMAP_NO_LEDGER") == "1":
         return
     cmd = [
-        sys.executable, str(BIN / "usage.py"), "record",
-        "-p", cfg["slug"], "-f", feature, "-t", task_id, "-r", "architect",
-        "-m", cfg["model"],
-        "--input", str(int(usage.get("prompt_tokens") or 0)),
-        "--output", str(int(usage.get("completion_tokens") or 0)),
-        "--note", "roadmap.py",
+        sys.executable,
+        str(BIN / "usage.py"),
+        "record",
+        "-p",
+        cfg["slug"],
+        "-f",
+        feature,
+        "-t",
+        task_id,
+        "-r",
+        "architect",
+        "-m",
+        cfg["model"],
+        "--input",
+        str(int(usage.get("prompt_tokens") or 0)),
+        "--output",
+        str(int(usage.get("completion_tokens") or 0)),
+        "--note",
+        "roadmap.py",
     ]
     cached = int((usage.get("prompt_tokens_details") or {}).get("cached_tokens") or 0)
     if cached:
@@ -187,8 +205,14 @@ def validate(roadmap: dict) -> list[str]:
             if tid in seen:
                 errors.append(f"duplicate task id {tid}")
             seen[tid] = task
-            for field, kind in (("title", str), ("goal", str), ("size", str),
-                                ("scope", list), ("acceptance", list), ("roles", list)):
+            for field, kind in (
+                ("title", str),
+                ("goal", str),
+                ("size", str),
+                ("scope", list),
+                ("acceptance", list),
+                ("roles", list),
+            ):
                 if not isinstance(task.get(field), kind):
                     errors.append(f"{tid}: field {field!r} is missing or of the wrong type")
             if task.get("size") not in ("S", "M", "L"):
@@ -222,8 +246,7 @@ def validate(roadmap: dict) -> list[str]:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(
-        description="Turn a product vision into a staged roadmap for the board.")
+    parser = argparse.ArgumentParser(description="Turn a product vision into a staged roadmap for the board.")
     parser.add_argument("--project", required=True)
     parser.add_argument("--request", required=True, help="text or @path")
     parser.add_argument("--repo", help="repository path; defaults to ~/projects/<slug>")
@@ -264,8 +287,15 @@ def main() -> int:
         "THE WHOLE ROADMAP, AS PLANNED (keep ids and ordering consistent with it)\n"
         + json.dumps(stages, ensure_ascii=False, indent=1)
         + "\n\nREPOSITORY TOP LEVEL\n"
-        + "\n".join(sorted({ln.split(" (")[0].split("/")[0] for ln in map_doc.splitlines()
-                            if " (" in ln and not ln.startswith(" ")}))
+        + "\n".join(
+            sorted(
+                {
+                    ln.split(" (")[0].split("/")[0]
+                    for ln in map_doc.splitlines()
+                    if " (" in ln and not ln.startswith(" ")
+                }
+            )
+        )
     )
 
     def expand(stage: dict) -> dict:
@@ -277,8 +307,7 @@ def main() -> int:
             f"Planned task titles: {json.dumps(stage.get('task_titles') or [], ensure_ascii=False)}\n"
             f"Optional stage: {bool(stage.get('optional'))}\n\n" + context
         )
-        answer, usage = call_json(cfg, STAGE_PROMPT, user, f"_roadmap:{stage.get('id')}",
-                                  str(stage.get("id")))
+        answer, usage = call_json(cfg, STAGE_PROMPT, user, f"_roadmap:{stage.get('id')}", str(stage.get("id")))
         return {"stage": stage, "answer": answer, "usage": usage}
 
     with ThreadPoolExecutor(max_workers=max(1, args.workers)) as pool:
@@ -306,7 +335,7 @@ def main() -> int:
 
     result = {
         "project": args.project,
-        "generated_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "generated_at": datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "model": cfg["model"],
         "roadmap": roadmap,
         "validation": {"ok": not errors, "errors": errors},
@@ -315,7 +344,7 @@ def main() -> int:
 
     state_dir = STATE / args.project / "roadmap"
     state_dir.mkdir(parents=True, exist_ok=True)
-    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
     payload = json.dumps(result, ensure_ascii=False, indent=1)
     (state_dir / f"{stamp}.json").write_text(payload + "\n", encoding="utf-8")
     (state_dir / "roadmap.json").write_text(payload + "\n", encoding="utf-8")

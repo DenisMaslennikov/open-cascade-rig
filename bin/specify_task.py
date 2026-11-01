@@ -21,22 +21,30 @@ State:
 Exit codes: 0 — tests and stubs are frozen and provably red; 1 — nothing to freeze, or the run
 failed (bad answer, path outside files_allowed, tests not red).
 """
+
 from __future__ import annotations
 
 import argparse
 import json
 import re
-import os
 import subprocess
 import sys
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
+
+from rig_conf import gateway
 
 BIN = Path(__file__).resolve().parent
 sys.path.insert(0, str(BIN))
 
 from plan_task import (  # noqa: E402
-    CONFIG, STATE, extract_json, load_keys, parse_simple_yaml, repo_map, token_limit,
+    CONFIG,
+    STATE,
+    extract_json,
+    load_keys,
+    parse_simple_yaml,
+    repo_map,
+    token_limit,
 )
 
 HOUSE_RULES = """
@@ -103,7 +111,7 @@ def project_config(slug: str, role: str = "specifier") -> dict:
     return {
         "model": model,
         "key": key,
-        "base_url": (project.get("_", {}).get("base_url") or "http://litellm.service/v1").rstrip("/"),
+        "base_url": gateway(project, script="specify_task.py"),
         "temperature": float(params.get("temperature", 0.1)),
         "max_tokens": token_limit(params.get("max_tokens")),
     }
@@ -132,8 +140,7 @@ def existing_files(worktree: Path, allowed: list[str]) -> str:
     return "\n\n".join(parts)
 
 
-def build_user_message(subtask: dict, repo_doc: str, test_rules: str,
-                       plan_tests: list[str], existing: str = "") -> str:
+def build_user_message(subtask: dict, repo_doc: str, test_rules: str, plan_tests: list[str], existing: str = "") -> str:
     hint = "\n".join(f"- {p}" for p in plan_tests) or "- (none declared: derive the path from the stub)"
     return (
         "SUBTASK (authoritative)\n"
@@ -145,9 +152,12 @@ def build_user_message(subtask: dict, repo_doc: str, test_rules: str,
         f"{test_rules}\n\n"
         "REPOSITORY MAP AND RULES\n"
         f"{repo_doc}\n"
-        + ("\nFILES YOU MAY CHANGE, AS THEY ARE NOW (keep every existing line that works; add only\n"
-           "what this subtask needs, and keep the module importing cleanly)\n" + existing + "\n"
-           if existing else "")
+        + (
+            "\nFILES YOU MAY CHANGE, AS THEY ARE NOW (keep every existing line that works; add only\n"
+            "what this subtask needs, and keep the module importing cleanly)\n" + existing + "\n"
+            if existing
+            else ""
+        )
     )
 
 
@@ -157,16 +167,16 @@ def derived_test_path(stub_path: str) -> str:
     rest = stub_path
     for contour in ("backend/", "frontend/"):
         if rest.startswith(contour):
-            prefix, rest = contour, rest[len(contour):]
+            prefix, rest = contour, rest[len(contour) :]
             break
     for src_root in ("src/", "app/", "lib/", "pkg/"):
         if rest.startswith(src_root):
-            rest = rest[len(src_root):]
+            rest = rest[len(src_root) :]
             break
     # the package root of a src-layout project is not part of the mirrored path
     for package_root in ("app/", "lib/", "pkg/"):
         if rest.startswith(package_root):
-            rest = rest[len(package_root):]
+            rest = rest[len(package_root) :]
             break
     directory, _, name = rest.rpartition("/")
     stem = name[:-3] if name.endswith(".py") else name
@@ -174,8 +184,9 @@ def derived_test_path(stub_path: str) -> str:
     return f"{prefix}tests/unit/{tail}"
 
 
-def write_files(worktree: Path, files: list[dict], allowed: list[str], force: bool,
-                plan_tests: set[str] | None = None) -> tuple[bool, list[str]]:
+def write_files(
+    worktree: Path, files: list[dict], allowed: list[str], force: bool, plan_tests: set[str] | None = None
+) -> tuple[bool, list[str]]:
     errors: list[str] = []
     normalized = [a.rstrip("/") for a in allowed]
     expected_tests = {derived_test_path(a) for a in allowed if "/src/" in f"/{a}"}
@@ -191,9 +202,7 @@ def write_files(worktree: Path, files: list[dict], allowed: list[str], force: bo
             errors.append(f"{path}: empty content")
             continue
         inside = any(
-            path == a or path.startswith(a.rstrip("/") + "/")
-            or (a.endswith(".py") and path == a)
-            for a in normalized
+            path == a or path.startswith(a.rstrip("/") + "/") or (a.endswith(".py") and path == a) for a in normalized
         )
         if kind == "test":
             stem_ok = any(path.endswith(f"test_{Path(a).stem}.py") for a in allowed)
@@ -211,10 +220,15 @@ def write_files(worktree: Path, files: list[dict], allowed: list[str], force: bo
         if kind == "stub" and "/src/" not in f"/{path}":
             errors.append(f"{path}: a stub must live under src/")
             continue
-        extending = (worktree / path).exists()   # an extension keeps real code, it is not a stub
+        extending = (worktree / path).exists()  # an extension keeps real code, it is not a stub
         is_error_module = "Error(" in content and "NotImplementedError" not in content
-        if kind == "stub" and "NotImplementedError" not in content \
-                and not path.endswith("__init__.py") and not extending and not is_error_module:
+        if (
+            kind == "stub"
+            and "NotImplementedError" not in content
+            and not path.endswith("__init__.py")
+            and not extending
+            and not is_error_module
+        ):
             errors.append(f"{path}: a stub must raise NotImplementedError")
             continue
         if kind == "test" and "NotImplementedError" in content:
@@ -225,11 +239,12 @@ def write_files(worktree: Path, files: list[dict], allowed: list[str], force: bo
             # The specifier may extend a module that already has real code, never rewrite it.
             old = target.read_text(encoding="utf-8")
             symbols = re.findall(r"(?m)^(?:\s*)(?:def|class)\s+(\w+)", old)
-            lost = [s for s in symbols if not re.search(rf"(?m)^\s*(?:def|class)\s+{re.escape(s)}\b",
-                                                        content)]
+            lost = [s for s in symbols if not re.search(rf"(?m)^\s*(?:def|class)\s+{re.escape(s)}\b", content)]
             if lost:
-                errors.append(f"{path}: the answer drops existing definitions {lost}; "
-                              "a stub must only add to a module that already has code")
+                errors.append(
+                    f"{path}: the answer drops existing definitions {lost}; "
+                    "a stub must only add to a module that already has code"
+                )
                 continue
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(content if content.endswith("\n") else content + "\n", encoding="utf-8")
@@ -238,8 +253,7 @@ def write_files(worktree: Path, files: list[dict], allowed: list[str], force: bo
         target = worktree / path
         if not path.endswith(".py") or not target.exists():
             continue
-        compiled = subprocess.run([sys.executable, "-m", "py_compile", str(target)],
-                                  capture_output=True, text=True)
+        compiled = subprocess.run([sys.executable, "-m", "py_compile", str(target)], capture_output=True, text=True)
         if compiled.returncode != 0:
             errors.append(f"{path}: does not compile: {compiled.stderr.strip()[:300]}")
     return not errors, errors
@@ -250,10 +264,25 @@ def record_usage(slug: str, feature: str, task_id: str, model: str, usage: dict)
     completion_tokens = int(usage.get("completion_tokens") or 0)
     cached = int((usage.get("prompt_tokens_details") or {}).get("cached_tokens") or 0)
     cmd = [
-        sys.executable, str(BIN / "usage.py"), "record",
-        "-p", slug, "-f", feature, "-t", task_id, "-r", "specifier",
-        "-m", model, "--input", str(prompt_tokens), "--output", str(completion_tokens),
-        "--note", "specify_task.py",
+        sys.executable,
+        str(BIN / "usage.py"),
+        "record",
+        "-p",
+        slug,
+        "-f",
+        feature,
+        "-t",
+        task_id,
+        "-r",
+        "specifier",
+        "-m",
+        model,
+        "--input",
+        str(prompt_tokens),
+        "--output",
+        str(completion_tokens),
+        "--note",
+        "specify_task.py",
     ]
     if cached:
         cmd += ["--cache-read", str(cached)]
@@ -271,9 +300,11 @@ def main() -> int:
     ap.add_argument("--subtask", required=True)
     ap.add_argument("--worktree", required=True, help="git worktree of the task branch")
     ap.add_argument("--model", help="override the specifier model (debug runs use a cheap one)")
-    ap.add_argument("--python", default=str(Path.home() / "projects" / "occc" / "backend" / ".venv" /
-                                             "bin" / "python"),
-                    help="interpreter that can import the backend dependencies")
+    ap.add_argument(
+        "--python",
+        default=str(Path.home() / "projects" / "occc" / "backend" / ".venv" / "bin" / "python"),
+        help="interpreter that can import the backend dependencies",
+    )
     ap.add_argument("--feature", default="", help="feature id recorded in the ledger")
     ap.add_argument("--reference", help="file with authoritative values the tests must copy, not derive")
     ap.add_argument("--force", action="store_true")
@@ -296,17 +327,18 @@ def main() -> int:
 
     test_rules_path = worktree / ".agents" / "rules" / "testing.md"
     test_rules = test_rules_path.read_text(encoding="utf-8") if test_rules_path.exists() else ""
-    plan_tests = sorted({f for s in plan.get("subtasks") or [] for f in s.get("files_allowed") or []
-                         if "/tests/" in f"/{f}"})
+    plan_tests = sorted(
+        {f for s in plan.get("subtasks") or [] for f in s.get("files_allowed") or [] if "/tests/" in f"/{f}"}
+    )
     reference = ""
     if args.reference:
-        ref_path = Path(args.reference if not args.reference.startswith("@")
-                        else args.reference[1:]).expanduser()
+        ref_path = Path(args.reference if not args.reference.startswith("@") else args.reference[1:]).expanduser()
         reference = ref_text = ref_path.read_text(encoding="utf-8")
         if "REFERENCE" not in ref_text.upper():
             reference = "AUTHORITATIVE REFERENCE VALUES\n" + ref_text
-    user_message = build_user_message(subtask, repo_map(worktree), test_rules, plan_tests,
-                                      existing_files(worktree, allowed))
+    user_message = build_user_message(
+        subtask, repo_map(worktree), test_rules, plan_tests, existing_files(worktree, allowed)
+    )
     if reference:
         user_message += "\n" + reference + "\n"
 
@@ -314,14 +346,18 @@ def main() -> int:
     spec_dir_early.mkdir(parents=True, exist_ok=True)
 
     from plan_task import call_model, call_model_stream
+
     raw, usage = call_model_stream(cfg, SYSTEM_PROMPT + HOUSE_RULES, user_message)
     (spec_dir_early / "raw.txt").write_text(raw, encoding="utf-8")
     try:
         answer = extract_json(raw)
     except (SystemExit, ValueError):
         repair = {
-            "model": cfg["model"], "key": cfg["key"], "base_url": cfg["base_url"],
-            "temperature": 0.0, "max_tokens": cfg["max_tokens"],
+            "model": cfg["model"],
+            "key": cfg["key"],
+            "base_url": cfg["base_url"],
+            "temperature": 0.0,
+            "max_tokens": cfg["max_tokens"],
         }
         fixed, repair_usage = call_model(
             repair,
@@ -331,10 +367,12 @@ def main() -> int:
             raw[:60000],
         )
         (spec_dir_early / "raw.repair.txt").write_text(fixed, encoding="utf-8")
-        usage = {**usage, "prompt_tokens": int(usage.get("prompt_tokens") or 0)
-                 + int(repair_usage.get("prompt_tokens") or 0),
-                 "completion_tokens": int(usage.get("completion_tokens") or 0)
-                 + int(repair_usage.get("completion_tokens") or 0)}
+        usage = {
+            **usage,
+            "prompt_tokens": int(usage.get("prompt_tokens") or 0) + int(repair_usage.get("prompt_tokens") or 0),
+            "completion_tokens": int(usage.get("completion_tokens") or 0)
+            + int(repair_usage.get("completion_tokens") or 0),
+        }
         answer = extract_json(fixed)
 
     files = answer.get("files") or []
@@ -349,7 +387,8 @@ def main() -> int:
             + "\n\nYOUR PREVIOUS ANSWER OMITTED THESE FILES FROM `files_allowed`: "
             + ", ".join(missing)
             + "\nEmit them now, complete, in the same JSON object: stubs with real signatures and "
-              "`raise NotImplementedError`, and the test file that imports what they export.")
+            "`raise NotImplementedError`, and the test file that imports what they export."
+        )
         raw2, usage2 = call_model_stream(cfg, SYSTEM_PROMPT + HOUSE_RULES, retry_message)
         (STATE / args.project / "specs" / args.subtask / "raw.retry.txt").write_text(raw2, encoding="utf-8")
         try:
@@ -379,17 +418,18 @@ def main() -> int:
         "truth_table": truth_table,
         "commit": None,
         "red_gate": None,
-        "usage": {"prompt_tokens": usage.get("prompt_tokens"),
-                  "completion_tokens": usage.get("completion_tokens")},
+        "usage": {"prompt_tokens": usage.get("prompt_tokens"), "completion_tokens": usage.get("completion_tokens")},
     }
 
     spec_dir = STATE / args.project / "specs" / args.subtask
     spec_dir.mkdir(parents=True, exist_ok=True)
-    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
     (spec_dir / f"{stamp}.json").write_text(
-        json.dumps({**result, "answer": answer}, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
+        json.dumps({**result, "answer": answer}, ensure_ascii=False, indent=1) + "\n", encoding="utf-8"
+    )
     (spec_dir / "latest.json").write_text(
-        json.dumps({**result, "answer": answer}, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
+        json.dumps({**result, "answer": answer}, ensure_ascii=False, indent=1) + "\n", encoding="utf-8"
+    )
     (spec_dir / "raw.txt").write_text(raw, encoding="utf-8")
 
     if args.dry_run:
@@ -407,15 +447,33 @@ def main() -> int:
         return 1
 
     state = STATE / args.project
-    (state / "task.json").write_text(json.dumps({
-        "id": args.subtask, "feature": args.feature, "files_allowed": allowed,
-        "tests": test_paths, "spec_at": stamp,
-    }, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
+    (state / "task.json").write_text(
+        json.dumps(
+            {
+                "id": args.subtask,
+                "feature": args.feature,
+                "files_allowed": allowed,
+                "tests": test_paths,
+                "spec_at": stamp,
+            },
+            ensure_ascii=False,
+            indent=1,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
 
     git(worktree, "add", "-A")
-    commit = git(worktree, "-c", "user.name=cascade-specifier",
-                 "-c", "user.email=cascade@localhost",
-                 "commit", "-m", f"test: freeze {args.subtask} specifications")
+    commit = git(
+        worktree,
+        "-c",
+        "user.name=cascade-specifier",
+        "-c",
+        "user.email=cascade@localhost",
+        "commit",
+        "-m",
+        f"test: freeze {args.subtask} specifications",
+    )
     if commit.returncode != 0:
         print(f"ERROR: commit failed: {commit.stderr.strip()[:300]}", file=sys.stderr)
         return 1
@@ -427,7 +485,8 @@ def main() -> int:
     cmd = f"{args.python} -m pytest {' '.join(rel_tests)} -q"
     gate = subprocess.run(
         [sys.executable, str(BIN / "gate.py"), "expect-fail", "--repo", str(backend), "--cmd", cmd],
-        capture_output=True, text=True,
+        capture_output=True,
+        text=True,
     )
     result["red_gate"] = json.loads(gate.stdout or "{}")
     result["red_gate"]["command"] = cmd

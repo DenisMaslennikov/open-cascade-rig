@@ -11,6 +11,7 @@ CLI:
 
 Exit 0 — the table covers the source and every row is well formed; 1 — otherwise.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -89,8 +90,14 @@ def main() -> int:
     missing = [t for t in wanted if t not in rows]
     extra = [t for t in rows if t not in wanted]
 
-    verdict = {"ok": not errors and not missing, "rows": len(rows), "missing": missing,
-               "extra": extra, "errors": errors, "warnings": warnings}
+    verdict = {
+        "ok": not errors and not missing,
+        "rows": len(rows),
+        "missing": missing,
+        "extra": extra,
+        "errors": errors,
+        "warnings": warnings,
+    }
     print(json.dumps(verdict, ensure_ascii=False, indent=1))
     for item in errors + [f"missing row: {t}" for t in missing]:
         print(f"ERROR: {item}", file=sys.stderr)

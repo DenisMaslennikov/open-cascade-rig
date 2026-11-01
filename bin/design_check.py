@@ -13,19 +13,19 @@ CLI:
 
 Exit 0 — accepted; 1 — rejected, with the reasons on stderr and a JSON verdict on stdout.
 """
+
 from __future__ import annotations
 
 import argparse
 import json
 import os
-import re
 import subprocess
 import sys
 from pathlib import Path
 
 # playwright lives in the agent runtime, not in the system interpreter
 RENDER_PY = Path.home() / "soft" / "openhands" / ".venv" / "bin" / "python"
-RENDER_LIB = Path.home() / ".local" / "lib"   # libnss/libatk/... unpacked from .deb, no root here
+RENDER_LIB = Path.home() / ".local" / "lib"  # libnss/libatk/... unpacked from .deb, no root here
 LIGHT_TOKENS = ("#f4f8fd", "#ffffff", "#2f6fed")
 DARK_TOKENS = ("#0f141a", "#1b222c", "#5b8ff9")
 EXTERNAL = ("<script", "@import url(", "fonts.googleapis", 'src="http', "src='http", "@font-face url(http")
@@ -47,8 +47,7 @@ with sync_playwright() as p:
     env = dict(os.environ)
     if RENDER_LIB.exists():
         env["LD_LIBRARY_PATH"] = f"{RENDER_LIB}:{env.get('LD_LIBRARY_PATH', '')}".rstrip(":")
-    proc = subprocess.run([python, "-c", script], capture_output=True, text=True, timeout=180,
-                          env=env)
+    proc = subprocess.run([python, "-c", script], capture_output=True, text=True, timeout=180, env=env)
     if proc.returncode != 0:
         return False, (proc.stderr or proc.stdout).strip()[-400:]
     return png.exists(), ""
@@ -65,10 +64,13 @@ def main() -> int:
     ap.add_argument("--shots", action="store_true", help="render a PNG next to every page")
     ap.add_argument("--min-components", type=int, default=3)
     ap.add_argument("--page", default="*.html", help="glob of the pages this verdict is about")
-    ap.add_argument("--require", action="append", default=[],
-                    help="a literal the page must contain (repeatable); the task's own acceptance")
-    ap.add_argument("--min-matches", type=int, default=1,
-                    help="how many times every --require literal must appear")
+    ap.add_argument(
+        "--require",
+        action="append",
+        default=[],
+        help="a literal the page must contain (repeatable); the task's own acceptance",
+    )
+    ap.add_argument("--min-matches", type=int, default=1, help="how many times every --require literal must appear")
     a = ap.parse_args()
 
     root = Path(a.repo).expanduser().resolve() / a.dir
@@ -89,7 +91,7 @@ def main() -> int:
                 if token not in html.lower():
                     errors.append(f"{page.name}: the light palette token {token} is missing")
             if 'data-theme="dark"' in html:
-                errors.append(f"{page.name}: still carries data-theme=\"dark\"")
+                errors.append(f'{page.name}: still carries data-theme="dark"')
         if a.dark:
             for token in DARK_TOKENS:
                 if token not in html.lower():
@@ -99,14 +101,15 @@ def main() -> int:
         if a.nav:
             for variant in ("expanded", "collapsed"):
                 if f'data-nav="{variant}"' not in html:
-                    errors.append(f'{page.name}: navigation variant {variant!r} is not rendered')
+                    errors.append(f"{page.name}: navigation variant {variant!r} is not rendered")
         for needle in a.require:
             if html.count(needle) < a.min_matches:
-                errors.append(f"{page.name}: expects at least {a.min_matches} of {needle!r}, "
-                              f"found {html.count(needle)}")
+                errors.append(
+                    f"{page.name}: expects at least {a.min_matches} of {needle!r}, found {html.count(needle)}"
+                )
         for state in [s.strip() for s in a.states.split(",") if s.strip()]:
             if f'data-state="{state}"' not in html:
-                errors.append(f'{page.name}: state {state!r} is not rendered')
+                errors.append(f"{page.name}: state {state!r} is not rendered")
 
     shots = []
     if a.shots and pages:
@@ -118,8 +121,7 @@ def main() -> int:
             else:
                 errors.append(f"{page.name}: does not render: {message}")
 
-    verdict = {"ok": not errors, "dir": str(root), "pages": [p.name for p in pages],
-               "shots": shots, "errors": errors}
+    verdict = {"ok": not errors, "dir": str(root), "pages": [p.name for p in pages], "shots": shots, "errors": errors}
     print(json.dumps(verdict, ensure_ascii=False, indent=1))
     for error in errors:
         print(f"ERROR: {error}", file=sys.stderr)

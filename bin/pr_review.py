@@ -14,6 +14,7 @@ CLI:
 Output (stdout, one JSON object): {"ok": true, "review": path, "usage": {...}, "verdict": hint}
 Exit codes: 0 — review produced, 1 — failure.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -22,8 +23,10 @@ import os
 import re
 import subprocess
 import sys
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
+
+from rig_conf import gateway, project_config
 
 BIN = Path(__file__).resolve().parent
 sys.path.insert(0, str(BIN))
@@ -79,12 +82,15 @@ def gh(*args: str, cwd: Path) -> str:
 def added_file_diff(path: str, content: str) -> str:
     lines = content.splitlines()
     body = "\n".join("+" + line for line in lines)
-    return (f"diff --git a/{path} b/{path}\nnew file mode 100644\n--- /dev/null\n"
-            f"+++ b/{path}\n@@ -0,0 +1,{len(lines)} @@\n{body}\n")
+    return (
+        f"diff --git a/{path} b/{path}\nnew file mode 100644\n--- /dev/null\n"
+        f"+++ b/{path}\n@@ -0,0 +1,{len(lines)} @@\n{body}\n"
+    )
 
 
-def build_diff(mode: str, repo: Path, slug: str, pr: int | None,
-               diff_file: str | None = None, what: str | None = None) -> tuple[str, str]:
+def build_diff(
+    mode: str, repo: Path, slug: str, pr: int | None, diff_file: str | None = None, what: str | None = None
+) -> tuple[str, str]:
     if mode == "diff":
         if not diff_file:
             raise SystemExit("ERROR: --diff is required for mode diff")
@@ -98,8 +104,9 @@ def build_diff(mode: str, repo: Path, slug: str, pr: int | None,
         rendered = STATE / slug / "schema" / "schema.md"
         if not rendered.exists():
             raise SystemExit(f"ERROR: no rendered schema at {rendered} (run schema_design.py)")
-        return added_file_diff("docs/schema/SCHEMA.md", rendered.read_text(encoding="utf-8")), \
-            "the database schema contract rendered as a document"
+        return added_file_diff(
+            "docs/schema/SCHEMA.md", rendered.read_text(encoding="utf-8")
+        ), "the database schema contract rendered as a document"
     if mode == "docs":
         if not pr:
             raise SystemExit("ERROR: --pr is required for mode docs")
@@ -126,10 +133,9 @@ def runs_dir(slug: str) -> Path:
 
 def status(slug: str) -> int:
     """Show every review run: alive or not, how old, when its log last moved."""
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     rows = []
-    for record in sorted(runs_dir(slug).glob("*.json"), key=lambda p: p.stat().st_mtime,
-                         reverse=True)[:10]:
+    for record in sorted(runs_dir(slug).glob("*.json"), key=lambda p: p.stat().st_mtime, reverse=True)[:10]:
         data = json.loads(record.read_text(encoding="utf-8"))
         pid = data.get("pid")
         alive = False
@@ -140,8 +146,7 @@ def status(slug: str) -> int:
             except OSError:
                 alive = False
         log = Path(data.get("log", ""))
-        log_age = (now - datetime.fromtimestamp(log.stat().st_mtime, timezone.utc)).seconds \
-            if log.exists() else None
+        log_age = (now - datetime.fromtimestamp(log.stat().st_mtime, UTC)).seconds if log.exists() else None
         started = datetime.fromisoformat(data["started"])
         elapsed = int((now - started).total_seconds())
         if data.get("finished"):
@@ -152,9 +157,18 @@ def status(slug: str) -> int:
             state = "running"
         else:
             state = "dead"
-        rows.append({"run": record.stem, "model": data.get("model"), "mode": data.get("mode"),
-                     "state": state, "elapsed_s": elapsed, "log_age_s": log_age,
-                     "pid": pid, "log": data.get("log")})
+        rows.append(
+            {
+                "run": record.stem,
+                "model": data.get("model"),
+                "mode": data.get("mode"),
+                "state": state,
+                "elapsed_s": elapsed,
+                "log_age_s": log_age,
+                "pid": pid,
+                "log": data.get("log"),
+            }
+        )
     print(json.dumps({"project": slug, "runs": rows}, ensure_ascii=False, indent=1))
     return 0
 
@@ -175,11 +189,11 @@ def ask_human_checks(cfg: dict, review_markdown: str) -> tuple[list[str], dict]:
         "Write the points in Russian, one sentence each, no generic advice like «проверьте тесты». "
         "If nothing needs a human decision — the review is clean or everything is machine-checkable "
         "— return an empty list. Never invent a point to look thorough. "
-        'Answer as JSON: {"checks": []} and nothing else.\n\nREVIEW\n'
-        + review_markdown[:6000]
+        'Answer as JSON: {"checks": []} and nothing else.\n\nREVIEW\n' + review_markdown[:6000]
     )
-    content, usage = call_model_stream(cfg, "You extract open questions for a human reviewer.",
-                                       prompt, idle_timeout=180)
+    content, usage = call_model_stream(
+        cfg, "You extract open questions for a human reviewer.", prompt, idle_timeout=180
+    )
     try:
         answer = extract_json(content)
     except SystemExit:
@@ -194,8 +208,7 @@ def extract_human_checks(markdown: str) -> list[str]:
     start = None
     for index, line in enumerate(lines):
         stripped = line.strip().strip("#*").strip().lower()
-        if stripped.startswith(("что проверить человеку", "what the human must check",
-                               "what to check")):
+        if stripped.startswith(("что проверить человеку", "what the human must check", "what to check")):
             start = index + 1
             break
     if start is None:
@@ -222,21 +235,24 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Review a prepared diff with pr-agent.")
     parser.add_argument("--project", required=True)
     parser.add_argument("--status", action="store_true", help="list review runs and their health")
-    parser.add_argument("--max-output", type=int, default=2500,
-                        help="cap on completion tokens per call (config.max_output_tokens)")
-    parser.add_argument("--ai-timeout", type=int, default=600,
-                        help="per-request model timeout inside pr-agent (config.ai_timeout)")
+    parser.add_argument(
+        "--max-output", type=int, default=2500, help="cap on completion tokens per call (config.max_output_tokens)"
+    )
+    parser.add_argument(
+        "--ai-timeout", type=int, default=600, help="per-request model timeout inside pr-agent (config.ai_timeout)"
+    )
     parser.add_argument("--mode", choices=("schema", "docs", "diff"))
     parser.add_argument("--pr", type=int)
     parser.add_argument("--diff", help="unified diff file for --mode diff")
     parser.add_argument("--what", help="one-line description of the changes under review")
     parser.add_argument("--model", help="override the reviewer model (debug on a cheap one)")
-    parser.add_argument("--final", action="store_true",
-                        help="final PR review: use models.reviewer_final and a longer wait")
-    parser.add_argument("--timeout", type=int,
-                        help="seconds to wait for pr-agent (default 1900, --final 3600)")
-    parser.add_argument("--notify", action="store_true",
-                        help="send the Russian «на что обратить внимание» list to Telegram")
+    parser.add_argument(
+        "--final", action="store_true", help="final PR review: use models.reviewer_final and a longer wait"
+    )
+    parser.add_argument("--timeout", type=int, help="seconds to wait for pr-agent (default 1900, --final 3600)")
+    parser.add_argument(
+        "--notify", action="store_true", help="send the Russian «на что обратить внимание» list to Telegram"
+    )
     parser.add_argument("--repo", help="repository path; defaults to ~/projects/<slug>")
     parser.add_argument("--extra", default="", help="extra instruction for the reviewer")
     args = parser.parse_args()
@@ -254,7 +270,7 @@ def main() -> int:
     model = reviewer_model(args.project, args.model, final=args.final)
     out_dir = STATE / args.project / "reviews"
     out_dir.mkdir(parents=True, exist_ok=True)
-    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
     tag = f"{args.mode}-{stamp}"
     diff_path = out_dir / f"{tag}.diff"
     review_md = out_dir / f"{tag}.md"
@@ -266,30 +282,42 @@ def main() -> int:
 
     token = subprocess.run(["gh", "auth", "token"], capture_output=True, text=True).stdout.strip()
     env = dict(os.environ)
-    env.update({
-        "CONFIG__MODEL": f"openai/{model}",
-        # pr-agent refuses any model it does not know unless this is set, so it is not an output cap
-        # for our own calls — it is the reviewer's context budget. Override per run when needed.
-        "CONFIG__CUSTOM_MODEL_MAX_TOKENS": os.environ.get(
-            "CASCADE_REVIEW_MODEL_MAX_TOKENS", "32000"),
-        "CONFIG__RESPONSE_LANGUAGE": "ru-RU",
-        "CONFIG__AI_TIMEOUT": str(args.ai_timeout),
-        "CONFIG__MAX_OUTPUT_TOKENS": str(args.max_output),
-        "CONFIG__PUBLISH_OUTPUT": "false",
-        "CONFIG__PERSISTENT_COMMENT": "false",
-        "GITHUB__USER_TOKEN": token,
-        "GITHUB__DEPLOYMENT_TYPE": "user",
-        "OPENAI__KEY": key_of(args.project),
-        "OPENAI__API_BASE": "http://litellm.service/v1",
-    })
+    env.update(
+        {
+            "CONFIG__MODEL": f"openai/{model}",
+            # pr-agent refuses any model it does not know unless this is set, so it is not an output cap
+            # for our own calls — it is the reviewer's context budget. Override per run when needed.
+            "CONFIG__CUSTOM_MODEL_MAX_TOKENS": os.environ.get("CASCADE_REVIEW_MODEL_MAX_TOKENS", "32000"),
+            "CONFIG__RESPONSE_LANGUAGE": "ru-RU",
+            "CONFIG__AI_TIMEOUT": str(args.ai_timeout),
+            "CONFIG__MAX_OUTPUT_TOKENS": str(args.max_output),
+            "CONFIG__PUBLISH_OUTPUT": "false",
+            "CONFIG__PERSISTENT_COMMENT": "false",
+            "GITHUB__USER_TOKEN": token,
+            "GITHUB__DEPLOYMENT_TYPE": "user",
+            "OPENAI__KEY": key_of(args.project),
+            "OPENAI__API_BASE": gateway(project_config(args.project), script="pr_review"),
+        }
+    )
     record_path = runs_dir(args.project) / f"{tag}.json"
-    record_path.write_text(json.dumps({
-        "mode": args.mode, "model": model, "pid": None,
-        "started": datetime.now(timezone.utc).isoformat(timespec="seconds"),
-        "log": str(log_path), "diff": str(diff_path), "finished": False,
-    }, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
-    cmd = [str(PR_AGENT), f"--diff-file={diff_path}", f"--output={review_md}",
-           f"--json-output={review_json}", "review"]
+    record_path.write_text(
+        json.dumps(
+            {
+                "mode": args.mode,
+                "model": model,
+                "pid": None,
+                "started": datetime.now(UTC).isoformat(timespec="seconds"),
+                "log": str(log_path),
+                "diff": str(diff_path),
+                "finished": False,
+            },
+            ensure_ascii=False,
+            indent=1,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    cmd = [str(PR_AGENT), f"--diff-file={diff_path}", f"--output={review_md}", f"--json-output={review_json}", "review"]
     # The reviewer's answer is validated against pr-agent's review schema; a free-form instruction
     # with a colon is parsed by dynaconf as a nested setting and the answer stops validating.
     # The human-facing section is asked for afterwards, from the finished review text.
@@ -298,20 +326,17 @@ def main() -> int:
         cmd.append(f"--pr_reviewer.extra_instructions={extra}")
     # stream the log so the run is observable while the model is thinking
     with open(log_path, "w", encoding="utf-8") as log:
-        proc = subprocess.Popen(cmd, stdout=log, stderr=subprocess.STDOUT, text=True,
-                                env=env, cwd=repo)
+        proc = subprocess.Popen(cmd, stdout=log, stderr=subprocess.STDOUT, text=True, env=env, cwd=repo)
         current = json.loads(record_path.read_text(encoding="utf-8"))
         current["pid"] = proc.pid
-        record_path.write_text(json.dumps(current, ensure_ascii=False, indent=1) + "\n",
-                               encoding="utf-8")
+        record_path.write_text(json.dumps(current, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
         try:
             proc.wait(timeout=wait_seconds)
         except subprocess.TimeoutExpired:
             proc.kill()
     current = json.loads(record_path.read_text(encoding="utf-8"))
     current.update({"finished": True, "exit": proc.returncode})
-    record_path.write_text(json.dumps(current, ensure_ascii=False, indent=1) + "\n",
-                           encoding="utf-8")
+    record_path.write_text(json.dumps(current, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
     if proc.returncode != 0 or not review_md.exists():
         print(f"ERROR: pr-agent failed (exit {proc.returncode}); log {log_path}", file=sys.stderr)
         print(log_path.read_text(encoding="utf-8")[-800:], file=sys.stderr)
@@ -327,8 +352,13 @@ def main() -> int:
     text = review_md.read_text(encoding="utf-8")
     human_checks = extract_human_checks(text)
     if not human_checks:
-        llm = {"model": model, "key": key_of(args.project),
-               "base_url": "http://litellm.service/v1", "temperature": 0.0, "max_tokens": 900}
+        llm = {
+            "model": model,
+            "key": key_of(args.project),
+            "base_url": gateway(project_config(args.project), script="pr_review"),
+            "temperature": 0.0,
+            "max_tokens": 900,
+        }
         try:
             human_checks, extra_usage = ask_human_checks(llm, text)
         except SystemExit as exc:  # the section is optional; losing the whole review over it is not
@@ -340,25 +370,49 @@ def main() -> int:
     # A reviewer that could not review is not an approving reviewer. pr-agent writes a short
     # "Failed to review PR" and exits 0, which used to read as `approve` on a tiny answer.
     if re.search(r"failed to review|error reviewing", text, re.I) or "\n" not in text.strip():
-        print(f"ERROR: the reviewer produced no review (see {review_md}): {text.strip()[:300]}",
-              file=sys.stderr)
+        print(f"ERROR: the reviewer produced no review (see {review_md}): {text.strip()[:300]}", file=sys.stderr)
         return 1
-    verdict = ("block" if re.search(r"🔴|blocker|критич", text, re.I)
-               else "comment" if len(text.strip()) > 200 else "approve")
+    verdict = (
+        "block" if re.search(r"🔴|blocker|критич", text, re.I) else "comment" if len(text.strip()) > 200 else "approve"
+    )
     summary = {
-        "ok": True, "mode": args.mode, "target": what, "model": model,
-        "review": str(review_md), "diff": str(diff_path), "log": str(log_path),
-        "verdict": verdict, "human_checks": human_checks, "usage": usage,
+        "ok": True,
+        "mode": args.mode,
+        "target": what,
+        "model": model,
+        "review": str(review_md),
+        "diff": str(diff_path),
+        "log": str(log_path),
+        "verdict": verdict,
+        "human_checks": human_checks,
+        "usage": usage,
     }
     if usage.get("total_tokens"):
-        subprocess.run([
-            sys.executable, str(BIN / "usage.py"), "record",
-            "-p", args.project, "-f", f"_review:{args.mode}", "-t", f"{args.mode}",
-            "-r", "reviewer_final" if args.final else "reviewer", "-m", model,
-            "--input", str(usage.get("prompt_tokens") or usage.get("input_tokens") or 0),
-            "--output", str(usage.get("completion_tokens") or usage.get("output_tokens") or 0),
-            "--note", "pr_review.py",
-        ], capture_output=True, text=True)
+        subprocess.run(
+            [
+                sys.executable,
+                str(BIN / "usage.py"),
+                "record",
+                "-p",
+                args.project,
+                "-f",
+                f"_review:{args.mode}",
+                "-t",
+                f"{args.mode}",
+                "-r",
+                "reviewer_final" if args.final else "reviewer",
+                "-m",
+                model,
+                "--input",
+                str(usage.get("prompt_tokens") or usage.get("input_tokens") or 0),
+                "--output",
+                str(usage.get("completion_tokens") or usage.get("output_tokens") or 0),
+                "--note",
+                "pr_review.py",
+            ],
+            capture_output=True,
+            text=True,
+        )
     # The console block is what the owner reads — often on a phone, where a file path is useless.
     # So the message carries the review text itself (findings, not links), and the paths come last.
     scope = "финальное ревью PR" if args.final else "ревью подзадачи"
@@ -374,8 +428,7 @@ def main() -> int:
     report = "\n".join(lines)
     print(report)
     if args.notify:
-        subprocess.run([sys.executable, str(BIN / "notify.py"), "--text", report],
-                       capture_output=True, text=True)
+        subprocess.run([sys.executable, str(BIN / "notify.py"), "--text", report], capture_output=True, text=True)
     print(json.dumps(summary, ensure_ascii=False, indent=1))
     return 0
 

@@ -14,15 +14,15 @@ CLI:
 
 Exit 0 — everything up to date, 1 — something needs a human.
 """
+
 from __future__ import annotations
 
 import argparse
 import json
-import os
 import subprocess
 from pathlib import Path
 
-DEFAULT_REPOS = [Path.home() / "projects" / "occc", Path.home() / "projects" / "cascade-rig"]
+from rig_conf import REPOS_ENV, repos
 
 
 def git(repo: Path, *args: str) -> subprocess.CompletedProcess:
@@ -54,8 +54,13 @@ def sync(repo: Path) -> dict:
         return row
     merge = git(repo, "merge", "--ff-only", "origin/main")
     after = git(repo, "rev-parse", "HEAD").stdout.strip()
-    row.update({"state": "fast-forwarded" if merge.returncode == 0 else "cannot fast-forward",
-                "from": before[:7], "to": after[:7]})
+    row.update(
+        {
+            "state": "fast-forwarded" if merge.returncode == 0 else "cannot fast-forward",
+            "from": before[:7],
+            "to": after[:7],
+        }
+    )
     if merge.returncode != 0:
         row["error"] = merge.stderr.strip()[:200]
     return row
@@ -66,14 +71,21 @@ def main() -> int:
     ap.add_argument("--repo", action="append", help="repository path (repeatable)")
     ap.add_argument("--json", action="store_true")
     args = ap.parse_args()
-    repos = [Path(p).expanduser() for p in args.repo] if args.repo else DEFAULT_REPOS
-    rows = [sync(repo) for repo in repos]
+    targets = [Path(p).expanduser() for p in args.repo] if args.repo else repos()
+    if not targets:
+        raise SystemExit(
+            f"ERROR: no repositories to sync. Pass --repo PATH, set {REPOS_ENV}, or put "
+            f"`repo: <path>` in a project config under ~/.config/cascade/projects/."
+        )
+    rows = [sync(repo) for repo in targets]
     bad = [r for r in rows if r["state"] not in ("up to date", "fast-forwarded")]
     if args.json:
         print(json.dumps({"repos": rows, "needs_human": bad}, ensure_ascii=False, indent=1))
     else:
         for row in rows:
-            print(f"{row['repo']:40} {row['state']:26} {row.get('from','')}{'->'+row['to'] if row.get('to') else ''}")
+            print(
+                f"{row['repo']:40} {row['state']:26} {row.get('from', '')}{'->' + row['to'] if row.get('to') else ''}"
+            )
     return 1 if bad else 0
 
 

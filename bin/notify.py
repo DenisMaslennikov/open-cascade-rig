@@ -11,6 +11,7 @@ CLI:
 Output (stdout, one JSON object): {"ok": true, "message_id": N}
 Exit codes: 0 — sent, 1 — failure (reason in stderr).
 """
+
 from __future__ import annotations
 
 import argparse
@@ -20,8 +21,10 @@ import subprocess
 import sys
 import urllib.parse
 
+from rig_conf import TELEGRAM_PROXY_ENV, proxy
+
 ENV = os.path.expanduser("~/.hermes/.env")
-PROXY = os.environ.get("HERMES_TELEGRAM_PROXY", "socks5h://192.168.31.6:10808")
+PROXY = proxy(TELEGRAM_PROXY_ENV)  # None means: connect directly
 MAX_CHARS = 3900
 
 
@@ -39,8 +42,7 @@ def main() -> int:
     parser.add_argument("--silent", action="store_true", help="deliver without a sound")
     args = parser.parse_args()
 
-    text = (open(os.path.expanduser(args.text[1:]), encoding="utf-8").read()
-            if args.text.startswith("@") else args.text)
+    text = open(os.path.expanduser(args.text[1:]), encoding="utf-8").read() if args.text.startswith("@") else args.text
     text = text.strip()
     if not text:
         print("ERROR: empty message", file=sys.stderr)
@@ -55,25 +57,27 @@ def main() -> int:
         return 1
 
     url = f"https://api.telegram.org/bot{token}/sendMessage"
-    body = urllib.parse.urlencode({
-        "chat_id": chat,
-        "text": text,
-        "disable_notification": "true" if args.silent else "false",
-    })
+    body = urllib.parse.urlencode(
+        {
+            "chat_id": chat,
+            "text": text,
+            "disable_notification": "true" if args.silent else "false",
+        }
+    )
     proc = subprocess.run(
-        ["curl", "-sS", "--max-time", "30", "--proxy", PROXY, "-X", "POST", url, "--data", body],
-        capture_output=True, text=True)
+        ["curl", "-sS", "--max-time", "30", *(["--proxy", PROXY] if PROXY else []), "-X", "POST", url, "--data", body],
+        capture_output=True,
+        text=True,
+    )
     try:
         answer = json.loads(proc.stdout or "{}")
     except json.JSONDecodeError:
-        print(f"ERROR: telegram answered non-JSON: {proc.stdout[:200]} {proc.stderr[:200]}",
-              file=sys.stderr)
+        print(f"ERROR: telegram answered non-JSON: {proc.stdout[:200]} {proc.stderr[:200]}", file=sys.stderr)
         return 1
     if not answer.get("ok"):
         print(f"ERROR: telegram refused: {json.dumps(answer)[:300]}", file=sys.stderr)
         return 1
-    print(json.dumps({"ok": True,
-                      "message_id": (answer.get("result") or {}).get("message_id")}))
+    print(json.dumps({"ok": True, "message_id": (answer.get("result") or {}).get("message_id")}))
     return 0
 
 

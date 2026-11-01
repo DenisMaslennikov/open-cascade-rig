@@ -10,11 +10,12 @@ So: a weekly job pulls the whole catalogue through the proxy, caches it in the s
 the repository — it is data, not knowledge), and every report can be repriced against it.
 
 CLI:
-  prices_openrouter.py --refresh [--proxy socks5h://192.168.31.6:10808]
+  prices_openrouter.py --refresh [--proxy URL]
   prices_openrouter.py --report [--days 1] [--project P] [--json]
 
 Exit 0 — ok, 1 — the catalogue could not be fetched or parsed.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -22,12 +23,13 @@ import json
 import os
 import subprocess
 import sys
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
+
+from rig_conf import KEYS, PRICES_PROXY_ENV, proxy
 
 STATE = Path(os.environ.get("XDG_STATE_HOME", Path.home() / ".local" / "state")) / "cascade"
 CACHE = STATE / "pricing-openrouter.json"
-DEFAULT_PROXY = os.environ.get("CASCADE_PRICES_PROXY", "socks5h://192.168.31.6:10808")
 URL = "https://openrouter.ai/api/v1/models"
 
 # Our gateway names are OpenRouter ids with a "~" prefix, so the mapping is mostly identity; the
@@ -39,13 +41,24 @@ ALIASES = {
 }
 
 
-def fetch(proxy: str) -> dict:
-    proc = subprocess.run(
-        ["curl", "-s", "--max-time", "60", "--socks5-hostname", proxy.replace("socks5h://", ""), URL],
-        capture_output=True, text=True)
+def fetch(proxy_url: str | None) -> dict:
+    """Fetch the catalogue. No proxy configured means a direct connection, not a guessed one."""
+    cmd = ["curl", "-s", "--max-time", "60"]
+    if proxy_url:
+        host = proxy_url.replace("socks5h://", "").replace("socks5://", "")
+        cmd += ["--socks5-hostname", host] if "socks" in proxy_url else ["--proxy", proxy_url]
+    proc = subprocess.run(cmd + [URL], capture_output=True, text=True)
     if proc.returncode != 0 or not proc.stdout.strip():
-        raise SystemExit(f"ERROR: OpenRouter fetch failed via {proxy}: {proc.stderr.strip()[:200]}")
-    data = json.loads(proc.stdout)
+        hint = "" if proxy_url else f" (no proxy configured: set {PRICES_PROXY_ENV} or put it in {KEYS})"
+        raise SystemExit(f"ERROR: OpenRouter fetch failed{hint}: {proc.stderr.strip()[:200]}")
+    try:
+        data = json.loads(proc.stdout)
+    except json.JSONDecodeError as exc:
+        raise SystemExit(f"ERROR: OpenRouter returned a non-JSON body: {proc.stdout[:200]!r}") from exc
+    if not data.get("data"):
+        # A refusal (403 from a host that must go through the proxy) parses as JSON with no models.
+        # Writing that over a good cache would erase the prices silently, so it is an error.
+        raise SystemExit(f"ERROR: OpenRouter returned no models ({str(data)[:200]}); nothing cached")
     prices = {}
     for model in data.get("data") or []:
         pricing = model.get("pricing") or {}
@@ -54,17 +67,25 @@ def fetch(proxy: str) -> dict:
             completion = float(pricing.get("completion") or 0) * 1e6
         except (TypeError, ValueError):
             continue
-        prices[model["id"]] = {"in": round(prompt, 4), "out": round(completion, 4),
-                               "name": model.get("name") or model["id"]}
+        prices[model["id"]] = {
+            "in": round(prompt, 4),
+            "out": round(completion, 4),
+            "name": model.get("name") or model["id"],
+        }
     STATE.mkdir(parents=True, exist_ok=True)
-    CACHE.write_text(json.dumps({"fetched_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
-                                 "source": URL, "models": prices}, ensure_ascii=False), encoding="utf-8")
+    CACHE.write_text(
+        json.dumps(
+            {"fetched_at": datetime.now(UTC).isoformat(timespec="seconds"), "source": URL, "models": prices},
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
     return prices
 
 
-def load(refresh: bool, proxy: str) -> dict:
+def load(refresh: bool, proxy_url: str | None) -> dict:
     if refresh or not CACHE.exists():
-        return fetch(proxy)
+        return fetch(proxy_url)
     return json.loads(CACHE.read_text(encoding="utf-8"))["models"]
 
 
@@ -76,7 +97,7 @@ def price_of(models: dict, name: str) -> dict | None:
 
 
 def report(models: dict, days: int, project: str | None, as_json: bool = False) -> int:
-    since = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat(timespec="seconds")
+    since = (datetime.now(UTC) - timedelta(days=days)).isoformat(timespec="seconds")
     ledgers = [STATE / project / "usage.jsonl"] if project else sorted(STATE.glob("*/usage.jsonl"))
     rows: dict[str, dict] = {}
     unknown: set[str] = set()
@@ -95,30 +116,44 @@ def report(models: dict, days: int, project: str | None, as_json: bool = False) 
                 unknown.add(model)
                 continue
             key = f"{rec.get('role') or '?'}|{model}"
-            agg = rows.setdefault(key, {"role": rec.get("role"), "model": model,
-                                        "in": 0, "out": 0, "cache": 0, "cost": 0.0, "calls": 0})
+            agg = rows.setdefault(
+                key, {"role": rec.get("role"), "model": model, "in": 0, "out": 0, "cache": 0, "cost": 0.0, "calls": 0}
+            )
             agg["in"] += int(rec.get("input_tokens") or 0)
             agg["out"] += int(rec.get("output_tokens") or 0)
             agg["cache"] += int(rec.get("cache_read_tokens") or 0)
             agg["calls"] += 1
             # Cache reads are not priced here: OpenRouter does not publish a cache rate for every
             # route, and inventing one would make the total look better than it is.
-            agg["cost"] += (int(rec.get("input_tokens") or 0) * price["in"] / 1e6
-                            + int(rec.get("output_tokens") or 0) * price["out"] / 1e6)
+            agg["cost"] += (
+                int(rec.get("input_tokens") or 0) * price["in"] / 1e6
+                + int(rec.get("output_tokens") or 0) * price["out"] / 1e6
+            )
 
     out = sorted(rows.values(), key=lambda r: -r["cost"])
     if unknown:
         print(f"note: no OpenRouter price for {sorted(unknown)}", file=sys.stderr)
     if as_json:
-        print(json.dumps({"window_days": days, "rows": out,
-                          "total": round(sum(r["cost"] for r in out), 4),
-                          "priced_by": "openrouter"}, ensure_ascii=False, indent=1))
+        print(
+            json.dumps(
+                {
+                    "window_days": days,
+                    "rows": out,
+                    "total": round(sum(r["cost"] for r in out), 4),
+                    "priced_by": "openrouter",
+                },
+                ensure_ascii=False,
+                indent=1,
+            )
+        )
         return 0
     print(f"{'role':16} {'model':36} {'calls':>5} {'in':>9} {'out':>8} {'cost, $':>9}")
     for r in out:
         print(f"{r['role'] or '?':16} {r['model'][:36]:36} {r['calls']:5} {r['in']:9} {r['out']:8} {r['cost']:9.2f}")
-    print(f"{'TOTAL':16} {'':36} {'':5} {'':9} {'':8} {sum(r['cost'] for r in out):9.2f}"
-          f"   (prices: OpenRouter, {days}d window)")
+    print(
+        f"{'TOTAL':16} {'':36} {'':5} {'':9} {'':8} {sum(r['cost'] for r in out):9.2f}"
+        f"   (prices: OpenRouter, {days}d window)"
+    )
     return 0
 
 
@@ -128,10 +163,10 @@ def main() -> int:
     ap.add_argument("--report", action="store_true", help="reprice the ledger")
     ap.add_argument("--days", type=int, default=1)
     ap.add_argument("--project")
-    ap.add_argument("--proxy", default=DEFAULT_PROXY)
+    ap.add_argument("--proxy", help=f"proxy URL; default: ${PRICES_PROXY_ENV} or keys.env, else direct")
     ap.add_argument("--json", action="store_true")
     args = ap.parse_args()
-    models = load(args.refresh or args.report, args.proxy)
+    models = load(args.refresh or args.report, args.proxy or proxy(PRICES_PROXY_ENV))
     if args.report:
         return report(models, args.days, args.project, as_json=args.json)
     if args.refresh:

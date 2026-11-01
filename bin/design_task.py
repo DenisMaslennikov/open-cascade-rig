@@ -20,24 +20,32 @@ State:
 
 Exit codes: 0 — artefacts written and committed; 1 — failure.
 """
+
 from __future__ import annotations
 
 import argparse
 import json
 import re
-import os
 import shutil
 import subprocess
 import sys
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
+
+from rig_conf import gateway
 
 BIN = Path(__file__).resolve().parent
 sys.path.insert(0, str(BIN))
 
 from plan_task import (  # noqa: E402
-    CONFIG, STATE, call_model_stream, extract_json, load_keys, parse_simple_yaml, repo_map,
+    CONFIG,
+    STATE,
+    call_model_stream,
+    extract_json,
+    load_keys,
+    parse_simple_yaml,
+    repo_map,
     token_limit,
 )
 
@@ -129,7 +137,7 @@ def project_config(slug: str, role: str = "designer") -> dict:
     return {
         "model": model,
         "key": key,
-        "base_url": (project.get("_", {}).get("base_url") or "http://litellm.service/v1").rstrip("/"),
+        "base_url": gateway(project, script="design_task.py"),
         "temperature": float(params.get("temperature", 0.3)),
         "max_tokens": token_limit(params.get("max_tokens")),
     }
@@ -138,8 +146,12 @@ def project_config(slug: str, role: str = "designer") -> dict:
 def design_context(worktree: Path) -> str:
     """What the designer must see: the tokens, the theme wiring, the interface rules."""
     parts = []
-    for rel in ("frontend/src/theme/tokens.ts", "frontend/src/theme/antd.ts",
-                ".agents/rules/ui.md", "frontend/package.json"):
+    for rel in (
+        "frontend/src/theme/tokens.ts",
+        "frontend/src/theme/antd.ts",
+        ".agents/rules/ui.md",
+        "frontend/package.json",
+    ):
         path = worktree / rel
         if path.exists():
             text = path.read_text(encoding="utf-8", errors="replace")
@@ -149,11 +161,25 @@ def design_context(worktree: Path) -> str:
 
 def record_usage(slug: str, feature: str, model: str, usage: dict) -> None:
     cmd = [
-        sys.executable, str(BIN / "usage.py"), "record",
-        "-p", slug, "-f", feature, "-t", "_design", "-r", "designer",
-        "-m", model, "--input", str(usage.get("prompt_tokens") or 0),
-        "--output", str(usage.get("completion_tokens") or 0),
-        "--note", "design_task.py",
+        sys.executable,
+        str(BIN / "usage.py"),
+        "record",
+        "-p",
+        slug,
+        "-f",
+        feature,
+        "-t",
+        "_design",
+        "-r",
+        "designer",
+        "-m",
+        model,
+        "--input",
+        str(usage.get("prompt_tokens") or 0),
+        "--output",
+        str(usage.get("completion_tokens") or 0),
+        "--note",
+        "design_task.py",
     ]
     if (usage.get("prompt_tokens_details") or {}).get("cached_tokens"):
         cmd += ["--cache-read", str(usage["prompt_tokens_details"]["cached_tokens"])]
@@ -217,9 +243,19 @@ def marker_gaps(request: str, html: str) -> list[str]:
 
 def render(worktree: Path, html_files: list[str]) -> list[str]:
     """Best-effort PNG of each screen, so a human (and a vision model) can look without a browser."""
-    browser = next((p for p in (shutil.which("chromium"), shutil.which("chromium-browser"),
-                                shutil.which("google-chrome"), shutil.which("google-chrome-stable"))
-                    if p), None)
+    browser = next(
+        (
+            p
+            for p in (
+                shutil.which("chromium"),
+                shutil.which("chromium-browser"),
+                shutil.which("google-chrome"),
+                shutil.which("google-chrome-stable"),
+            )
+            if p
+        ),
+        None,
+    )
     if not browser:
         return []
     shots: list[str] = []
@@ -227,9 +263,19 @@ def render(worktree: Path, html_files: list[str]) -> list[str]:
         shot = worktree / rel
         png = shot.with_suffix(".png")
         proc = subprocess.run(
-            [browser, "--headless=new", "--no-sandbox", "--disable-gpu", "--hide-scrollbars",
-             "--window-size=1600,1000", f"--screenshot={png}", shot.as_uri()],
-            capture_output=True, text=True, timeout=120,
+            [
+                browser,
+                "--headless=new",
+                "--no-sandbox",
+                "--disable-gpu",
+                "--hide-scrollbars",
+                "--window-size=1600,1000",
+                f"--screenshot={png}",
+                shot.as_uri(),
+            ],
+            capture_output=True,
+            text=True,
+            timeout=120,
         )
         if proc.returncode == 0 and png.exists():
             shots.append(str(png))
@@ -242,10 +288,15 @@ def status(slug: str) -> int:
     now = time.time()
     for record in sorted(root.glob("*/record.json"), key=lambda p: p.stat().st_mtime, reverse=True)[:5]:
         data = json.loads(record.read_text(encoding="utf-8"))
-        rows.append({"started": data.get("started"), "state": data.get("state"),
-                     "model": data.get("model"),
-                     "age_seconds": int(now - record.stat().st_mtime),
-                     "dir": str(record.parent)})
+        rows.append(
+            {
+                "started": data.get("started"),
+                "state": data.get("state"),
+                "model": data.get("model"),
+                "age_seconds": int(now - record.stat().st_mtime),
+                "dir": str(record.parent),
+            }
+        )
     print(json.dumps({"runs": rows}, ensure_ascii=False, indent=1))
     return 0
 
@@ -279,12 +330,15 @@ def main() -> int:
 
     slug = args.project
     out_dir = args.out or f"docs/design/{slug}"
-    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
     run_dir = STATE / slug / "designs" / stamp
     run_dir.mkdir(parents=True, exist_ok=True)
-    (run_dir / "record.json").write_text(json.dumps(
-        {"started": stamp, "state": "waiting for the model", "model": cfg["model"]},
-        ensure_ascii=False, indent=1), encoding="utf-8")
+    (run_dir / "record.json").write_text(
+        json.dumps(
+            {"started": stamp, "state": "waiting for the model", "model": cfg["model"]}, ensure_ascii=False, indent=1
+        ),
+        encoding="utf-8",
+    )
 
     if args.from_raw:
         raw = Path(args.from_raw).expanduser().read_text(encoding="utf-8")
@@ -292,22 +346,41 @@ def main() -> int:
         html_text = "\n".join(f["content"] for f in files_block if f["path"].endswith(".html"))
         replay_gaps = marker_gaps(request, html_text)
         ok, errors = write_design(worktree, out_dir, files_block)
-        result = {"ok": False, "dir": out_dir, "files": [f["path"] for f in files_block],
-                  "gaps": replay_gaps, "screens": [], "handoff": [], "shots": [],
-                  "commit": None, "usage": {"model": "replay:" + str(args.from_raw),
-                                            "prompt_tokens": 0, "completion_tokens": 0}}
+        result = {
+            "ok": False,
+            "dir": out_dir,
+            "files": [f["path"] for f in files_block],
+            "gaps": replay_gaps,
+            "screens": [],
+            "handoff": [],
+            "shots": [],
+            "commit": None,
+            "usage": {"model": "replay:" + str(args.from_raw), "prompt_tokens": 0, "completion_tokens": 0},
+        }
         if not ok:
             print("\n".join(errors), file=sys.stderr)
             print(json.dumps(result, ensure_ascii=False))
             return 1
         subprocess.run(["git", "add", "-A"], cwd=worktree, capture_output=True, text=True)
         commit = subprocess.run(
-            ["git", "-c", "user.name=cascade-designer", "-c", "user.email=cascade@localhost",
-             "commit", "-m", "docs(design): " + (summary_text.splitlines() or ["replay"])[0][:60]],
-            cwd=worktree, capture_output=True, text=True)
+            [
+                "git",
+                "-c",
+                "user.name=cascade-designer",
+                "-c",
+                "user.email=cascade@localhost",
+                "commit",
+                "-m",
+                "docs(design): " + (summary_text.splitlines() or ["replay"])[0][:60],
+            ],
+            cwd=worktree,
+            capture_output=True,
+            text=True,
+        )
         if commit.returncode == 0:
-            result["commit"] = subprocess.run(["git", "rev-parse", "HEAD"], cwd=worktree,
-                                              capture_output=True, text=True).stdout.strip()
+            result["commit"] = subprocess.run(
+                ["git", "rev-parse", "HEAD"], cwd=worktree, capture_output=True, text=True
+            ).stdout.strip()
             result["ok"] = True
         else:
             result["error"] = commit.stderr.strip()[:300]
@@ -328,15 +401,20 @@ def main() -> int:
     for attempt in range(1, args.attempts + 1):
         message = user_message
         if gaps:
-            message += ("\n\nTHE PREVIOUS ATTEMPT WAS REJECTED BY THE ARTEFACT CHECK\n"
-                        + "\n".join(f"- {gap}" for gap in gaps)
-                        + "\nFix exactly these points and keep everything else.")
+            message += (
+                "\n\nTHE PREVIOUS ATTEMPT WAS REJECTED BY THE ARTEFACT CHECK\n"
+                + "\n".join(f"- {gap}" for gap in gaps)
+                + "\nFix exactly these points and keep everything else."
+            )
         try:
             raw, usage = call_model_stream(cfg, SYSTEM_PROMPT, message, idle_timeout=420)
         except SystemExit as exc:
-            (run_dir / "record.json").write_text(json.dumps(
-                {"started": stamp, "state": f"failed: {exc}", "model": cfg["model"]},
-                ensure_ascii=False, indent=1), encoding="utf-8")
+            (run_dir / "record.json").write_text(
+                json.dumps(
+                    {"started": stamp, "state": f"failed: {exc}", "model": cfg["model"]}, ensure_ascii=False, indent=1
+                ),
+                encoding="utf-8",
+            )
             raise
         # A model can stop on its own in the middle of a long HTML file (finish_reason=stop, not
         # length). Continue from the exact character instead of paying for a full regeneration.
@@ -349,10 +427,10 @@ def main() -> int:
                 "characters you wrote:\n<<<TAIL>>>\n" + tail + "\n<<<END TAIL>>>\n"
                 "Continue from exactly that point. Output only the remaining text, starting with the "
                 "next character. Finish the file and close it with <<<END>>>. No preamble, no apology, "
-                "no repetition of anything that came before.")
+                "no repetition of anything that came before."
+            )
             try:
-                more, more_usage = call_model_stream(cfg, SYSTEM_PROMPT, continuation,
-                                                     idle_timeout=420)
+                more, more_usage = call_model_stream(cfg, SYSTEM_PROMPT, continuation, idle_timeout=420)
             except SystemExit as exc:
                 print(f"note: continuation stopped: {exc}", file=sys.stderr)
                 break
@@ -363,34 +441,60 @@ def main() -> int:
         (run_dir / f"raw-{attempt}.txt").write_text(raw, encoding="utf-8")
         finish = (usage or {}).get("_finish_reason")
         if finish == "length" and not is_complete(raw):
-            (run_dir / "record.json").write_text(json.dumps(
-                {"started": stamp, "state": "truncated: finish_reason=length", "model": cfg["model"]},
-                ensure_ascii=False, indent=1), encoding="utf-8")
+            (run_dir / "record.json").write_text(
+                json.dumps(
+                    {"started": stamp, "state": "truncated: finish_reason=length", "model": cfg["model"]},
+                    ensure_ascii=False,
+                    indent=1,
+                ),
+                encoding="utf-8",
+            )
             raise SystemExit("ERROR: the answer hit max_tokens; ask for fewer screens per call")
         if not is_complete(raw):
-            (run_dir / "record.json").write_text(json.dumps(
-                {"started": stamp, "state": "truncated: a file block has no end marker",
-                 "model": cfg["model"]}, ensure_ascii=False, indent=1), encoding="utf-8")
-            raise SystemExit("ERROR: the answer stopped inside a file block (output was cut); "
-                             "ask for fewer files per call")
+            (run_dir / "record.json").write_text(
+                json.dumps(
+                    {"started": stamp, "state": "truncated: a file block has no end marker", "model": cfg["model"]},
+                    ensure_ascii=False,
+                    indent=1,
+                ),
+                encoding="utf-8",
+            )
+            raise SystemExit(
+                "ERROR: the answer stopped inside a file block (output was cut); ask for fewer files per call"
+            )
         files_block, summary_text = parse_blocks(raw)
         if files_block:
-            answer = {"files": files_block, "summary": summary_text,
-                      "title": (summary_text.splitlines() or ["design"])[0][:120],
-                      "screens": [], "handoff": []}
+            answer = {
+                "files": files_block,
+                "summary": summary_text,
+                "title": (summary_text.splitlines() or ["design"])[0][:120],
+                "screens": [],
+                "handoff": [],
+            }
         else:
             answer = extract_json(raw)
-        html = "\n".join(str(f.get("content") or "") for f in answer.get("files") or []
-                         if str(f.get("path", "")).endswith(".html"))
+        html = "\n".join(
+            str(f.get("content") or "") for f in answer.get("files") or [] if str(f.get("path", "")).endswith(".html")
+        )
         gaps = marker_gaps(request, html)
         if not gaps:
             break
 
-    result = {"ok": False, "dir": out_dir, "files": [], "gaps": gaps,
-              "screens": answer.get("screens") or [],
-              "handoff": answer.get("handoff") or [], "shots": [], "commit": None,
-              "usage": {"model": cfg["model"], "prompt_tokens": usage.get("prompt_tokens"),
-                        "completion_tokens": usage.get("completion_tokens")}}
+    result = {
+        "ok": False,
+        "dir": out_dir,
+        "files": [],
+        "gaps": gaps,
+        "screens": answer.get("screens") or [],
+        "handoff": answer.get("handoff") or [],
+        "shots": [],
+        "commit": None,
+        "usage": {
+            "model": cfg["model"],
+            "prompt_tokens": usage.get("prompt_tokens"),
+            "completion_tokens": usage.get("completion_tokens"),
+        },
+    }
 
     if args.dry_run:
         result["ok"] = True
@@ -400,9 +504,14 @@ def main() -> int:
     ok, errors = write_design(worktree, out_dir, answer.get("files") or [])
     if not ok:
         print("\n".join(errors), file=sys.stderr)
-        (run_dir / "record.json").write_text(json.dumps(
-            {"started": stamp, "state": "rejected: " + "; ".join(errors), "model": cfg["model"]},
-            ensure_ascii=False, indent=1), encoding="utf-8")
+        (run_dir / "record.json").write_text(
+            json.dumps(
+                {"started": stamp, "state": "rejected: " + "; ".join(errors), "model": cfg["model"]},
+                ensure_ascii=False,
+                indent=1,
+            ),
+            encoding="utf-8",
+        )
         record_usage(slug, out_dir, cfg["model"], usage)
         print(json.dumps(result, ensure_ascii=False))
         return 1
@@ -414,21 +523,37 @@ def main() -> int:
 
     subprocess.run(["git", "add", "-A"], cwd=worktree, capture_output=True, text=True)
     commit = subprocess.run(
-        ["git", "-c", "user.name=cascade-designer", "-c", "user.email=cascade@localhost",
-         "commit", "-m", f"docs(design): {answer.get('title') or out_dir}"],
-        cwd=worktree, capture_output=True, text=True,
+        [
+            "git",
+            "-c",
+            "user.name=cascade-designer",
+            "-c",
+            "user.email=cascade@localhost",
+            "commit",
+            "-m",
+            f"docs(design): {answer.get('title') or out_dir}",
+        ],
+        cwd=worktree,
+        capture_output=True,
+        text=True,
     )
     if commit.returncode == 0:
-        result["commit"] = subprocess.run(["git", "rev-parse", "HEAD"], cwd=worktree,
-                                          capture_output=True, text=True).stdout.strip()
+        result["commit"] = subprocess.run(
+            ["git", "rev-parse", "HEAD"], cwd=worktree, capture_output=True, text=True
+        ).stdout.strip()
         result["ok"] = True
     else:
         result["error"] = commit.stderr.strip()[:400]
 
     record_usage(slug, out_dir, cfg["model"], usage)
-    (run_dir / "record.json").write_text(json.dumps(
-        {"started": stamp, "state": "done" if result["ok"] else "failed", "model": cfg["model"],
-         "result": result}, ensure_ascii=False, indent=1), encoding="utf-8")
+    (run_dir / "record.json").write_text(
+        json.dumps(
+            {"started": stamp, "state": "done" if result["ok"] else "failed", "model": cfg["model"], "result": result},
+            ensure_ascii=False,
+            indent=1,
+        ),
+        encoding="utf-8",
+    )
     print(json.dumps(result, ensure_ascii=False, indent=1))
     return 0 if result["ok"] else 1
 

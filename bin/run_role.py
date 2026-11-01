@@ -20,6 +20,7 @@ State:
 
 Exit codes: 0 — the acceptance command passed and the result was committed; 1 — anything else.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -29,8 +30,10 @@ import signal
 import subprocess
 import sys
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
+
+from rig_conf import gateway
 
 BIN = Path(__file__).resolve().parent
 sys.path.insert(0, str(BIN))
@@ -60,23 +63,23 @@ READ_ONLY_ROLES = {"reviewer", "reviewer_final"}
 
 ROLE_FALLBACK_PROMPT = {
     "architect": "You are the architect of an automated development pipeline. You explore the "
-                 "repository, then write a plan of small subtasks as JSON that validates against "
-                 "the plan schema.",
+    "repository, then write a plan of small subtasks as JSON that validates against "
+    "the plan schema.",
     "designer": "You are the designer of an automated development pipeline. You write hand-made "
-                "HTML artefacts in the design directory of the repository and you check them in a "
-                "browser before you stop.",
+    "HTML artefacts in the design directory of the repository and you check them in a "
+    "browser before you stop.",
     "specifier": "You are the specifier of an automated development pipeline. You freeze tests and "
-                 "stubs for one subtask.",
+    "stubs for one subtask.",
     "chief_architect": "You are the chief architect: you answer the owner's question about the "
-                       "architecture in prose, with alternatives and risks.",
+    "architecture in prose, with alternatives and risks.",
     "executor": "You are the executor of an automated development pipeline. You make a small, "
-                "explicitly scoped change and run the acceptance command until it passes.",
+    "explicitly scoped change and run the acceptance command until it passes.",
     "reviewer": "You are the reviewer of an automated development pipeline. You read the diff and "
-                "the surrounding code, and you report findings for one small subtask. You never "
-                "modify files.",
+    "the surrounding code, and you report findings for one small subtask. You never "
+    "modify files.",
     "reviewer_final": "You are the final reviewer of an automated development pipeline. You read "
-                      "the whole pull request against the main branch and the code it touches, and "
-                      "you report findings once, for the owner. You never modify files.",
+    "the whole pull request against the main branch and the code it touches, and "
+    "you report findings once, for the owner. You never modify files.",
 }
 
 HOUSE = """
@@ -122,7 +125,7 @@ def project_config(slug: str, role: str) -> dict:
     return {
         "model": model,
         "key": key,
-        "base_url": (project.get("_", {}).get("base_url") or "http://litellm.service/v1").rstrip("/"),
+        "base_url": gateway(project, script="run_role.py"),
         "temperature": float(params.get("temperature", 0.2)),
         "max_tokens": token_limit(params.get("max_tokens")),
     }
@@ -135,9 +138,11 @@ def role_prompt(role: str, verify: str | None) -> str:
         raise SystemExit(f"ERROR: no prompt for role {role!r}")
     text += READ_ONLY_HOUSE if role in READ_ONLY_ROLES else HOUSE
     if verify:
-        text += (f"\n\nACCEPTANCE COMMAND (run it yourself, in the workspace root, until it passes):\n"
-                 f"    {verify}\nIt is the definition of done: a red acceptance command means your "
-                 "work is not finished, whatever you believe about it.")
+        text += (
+            f"\n\nACCEPTANCE COMMAND (run it yourself, in the workspace root, until it passes):\n"
+            f"    {verify}\nIt is the definition of done: a red acceptance command means your "
+            "work is not finished, whatever you believe about it."
+        )
     return text
 
 
@@ -156,9 +161,7 @@ def changed_files(worktree: Path, base: str | None = None) -> list[str]:
     untracked = git(worktree, "ls-files", "--others", "--exclude-standard").stdout.splitlines()
     # a role that resolves a conflict commits by itself; then the tree is clean and only the
     # commits between the starting point and HEAD show the work
-    committed = (
-        git(worktree, "diff", "--name-only", f"{base}..HEAD").stdout.splitlines() if base else []
-    )
+    committed = git(worktree, "diff", "--name-only", f"{base}..HEAD").stdout.splitlines() if base else []
     return sorted({p.strip() for p in (*tracked, *staged, *untracked, *committed) if p.strip()})
 
 
@@ -166,43 +169,115 @@ def metrics_of(conversation) -> dict:
     try:
         snapshot = conversation.conversation_stats.get_combined_metrics()
         data = snapshot.model_dump()
-    except Exception:  # noqa: BLE001 — accounting must never break a run
+    except Exception:
         return {"prompt_tokens": 0, "completion_tokens": 0, "cost_usd": 0.0}
     usage = data.get("accumulated_token_usage") or {}
-    return {"prompt_tokens": int(usage.get("prompt_tokens") or 0),
-            "completion_tokens": int(usage.get("completion_tokens") or 0),
-            "cache_read_tokens": int(usage.get("cache_read_tokens") or 0),
-            "cost_usd": float(data.get("accumulated_cost") or 0)}
+    return {
+        "prompt_tokens": int(usage.get("prompt_tokens") or 0),
+        "completion_tokens": int(usage.get("completion_tokens") or 0),
+        "cache_read_tokens": int(usage.get("cache_read_tokens") or 0),
+        "cost_usd": float(data.get("accumulated_cost") or 0),
+    }
 
 
 def record_usage(slug: str, role: str, model: str, usage: dict) -> None:
-    cmd = [sys.executable, str(BIN / "usage.py"), "record",
-           "-p", slug, "-f", f"_role:{role}", "-t", "_role", "-r", role, "-m", model,
-           "--input", str(usage.get("prompt_tokens") or 0),
-           "--output", str(usage.get("completion_tokens") or 0),
-           "--note", "run_role.py"]
+    cmd = [
+        sys.executable,
+        str(BIN / "usage.py"),
+        "record",
+        "-p",
+        slug,
+        "-f",
+        f"_role:{role}",
+        "-t",
+        "_role",
+        "-r",
+        role,
+        "-m",
+        model,
+        "--input",
+        str(usage.get("prompt_tokens") or 0),
+        "--output",
+        str(usage.get("completion_tokens") or 0),
+        "--note",
+        "run_role.py",
+    ]
     if usage.get("cache_read_tokens"):
         cmd += ["--cache-read", str(usage["cache_read_tokens"])]
     subprocess.run(cmd, capture_output=True, text=True)
 
 
-def build_agent(cfg: dict, role: str, model: str, system_prompt: str):
-    from openhands.sdk import LLM, Agent, Tool  # noqa: E402
-    from openhands.tools.file_editor import FileEditorTool  # noqa: E402
-    from openhands.tools.glob import GlobTool  # noqa: E402
-    from openhands.tools.grep import GrepTool  # noqa: E402
-    from openhands.tools.terminal import TerminalTool  # noqa: E402
+def gateway_prices(model: str) -> dict[str, float] | None:
+    """The gateway's price per token for one model, from its own /model/info cache."""
+    cache = CONFIG / "pricing.json"
+    if not cache.exists():
+        return None
+    try:
+        entry = (json.loads(cache.read_text(encoding="utf-8")) or {}).get(model)
+    except json.JSONDecodeError:
+        return None
+    if not entry:
+        return None
+    return {"in": float(entry.get("in") or 0.0), "out": float(entry.get("out") or 0.0)}
 
-    registry = {"terminal": TerminalTool, "file_editor": FileEditorTool,
-                "glob": GlobTool, "grep": GrepTool}
+
+def budget_scale(model: str) -> float:
+    """How many gateway-currency units one list-price unit buys, for this model.
+
+    The runtime compares `max_budget_per_run` against what *it* thinks the tokens cost, and what it thinks
+    comes from the gateway, whose overrides are 30-70x the list price. A budget written in the owner's
+    money therefore has to be scaled, or a cents-long run is killed as if it were a dollar-long one: an
+    architect run that cost $0.009 of list price died at "accumulated $2.3351 of $2.0000".
+
+    Returns 1.0 when either price is unknown: an unscaled budget is the old behaviour, which is wrong but
+    loud, rather than a silently generous cap.
+    """
+    listed, billed = list_prices(model), gateway_prices(model)
+    if not listed or not billed or not listed["in"] or not listed["out"]:
+        return 1.0
+    return max(billed["in"] / listed["in"], billed["out"] / listed["out"])
+
+
+def list_prices(model: str) -> dict[str, float] | None:
+    """OpenRouter list prices for one model, per token, or None when the cache has no entry.
+
+    The run budget (`max_budget_per_run`) is compared against the prices the runtime knows. When the
+    runtime prices a route with the local gateway's overrides — 30-70x the list price — a cheap run
+    looks expensive and is killed mid-work: a real architect run that cost $0.009 was aborted at
+    "$2.33 of $2.00". Handing the runtime the list price makes the budget mean money.
+    """
+    cache = STATE / "pricing-openrouter.json"
+    if not cache.exists():
+        return None
+    try:
+        models = json.loads(cache.read_text(encoding="utf-8")).get("models") or {}
+    except json.JSONDecodeError:
+        return None
+    candidates = [model, model.removeprefix("openai/"), model.removeprefix("~")]
+    for name in candidates:
+        entry = models.get(name)
+        if entry:
+            return {"in": float(entry["in"]) / 1e6, "out": float(entry["out"]) / 1e6}
+    return None
+
+
+def build_agent(cfg: dict, role: str, model: str, system_prompt: str):
+    from openhands.sdk import LLM, Agent, Tool
+    from openhands.tools.file_editor import FileEditorTool
+    from openhands.tools.glob import GlobTool
+    from openhands.tools.grep import GrepTool
+    from openhands.tools.terminal import TerminalTool
+
+    registry = {"terminal": TerminalTool, "file_editor": FileEditorTool, "glob": GlobTool, "grep": GrepTool}
     tools = []
     for name in ROLE_TOOLS.get(role, ["terminal", "file_editor"]):
         if name == "browser":
             try:
                 from openhands.tools.browser_use import BrowserToolSet  # noqa: F401
+
                 tools.append(Tool(name="browser_navigate"))
                 continue
-            except Exception:  # noqa: BLE001 — no browser backend on this host
+            except Exception:
                 print("note: browser tool unavailable, continuing without it", file=sys.stderr)
                 continue
         factory = registry.get(name)
@@ -210,28 +285,46 @@ def build_agent(cfg: dict, role: str, model: str, system_prompt: str):
             continue
         try:
             tools.append(Tool(name=factory.name))
-        except Exception as exc:  # noqa: BLE001 — a missing tool must not kill the run
+        except Exception as exc:
             print(f"note: tool {name} unavailable: {exc}", file=sys.stderr)
 
     llm_model = model if model.startswith("openai/") else f"openai/{model}"
-    llm = LLM(model=llm_model, base_url=cfg["base_url"], api_key=cfg["key"],
-              usage_id=f"cascade-{role}", temperature=cfg["temperature"],
-              max_output_tokens=cfg["max_tokens"])
+    prices = list_prices(model)
+    if prices is None:
+        # Without a known price the runtime counts the run as free and the budget never trips;
+        # say so rather than let a dead cap look like a live one.
+        print(
+            f"note: no OpenRouter price for {model}; the run budget is not enforced in money — "
+            f"run bin/prices_openrouter.py --refresh",
+            file=sys.stderr,
+        )
+    llm = LLM(
+        model=llm_model,
+        base_url=cfg["base_url"],
+        api_key=cfg["key"],
+        usage_id=f"cascade-{role}",
+        temperature=cfg["temperature"],
+        max_output_tokens=cfg["max_tokens"],
+        input_cost_per_token=prices["in"] if prices else None,
+        output_cost_per_token=prices["out"] if prices else None,
+    )
     # system_message_suffix is APPENDED to the built-in prompt, which carries the tool protocol.
     # Passing system_prompt= instead replaces that protocol and the model stops calling tools.
-    from openhands.sdk.context.agent_context import AgentContext  # noqa: E402
+    from openhands.sdk.context.agent_context import AgentContext
 
-    return Agent(llm=llm, tools=tools,
-                 agent_context=AgentContext(system_message_suffix=system_prompt),
-                 system_prompt_kwargs={"cli_mode": True})
+    return Agent(
+        llm=llm,
+        tools=tools,
+        agent_context=AgentContext(system_message_suffix=system_prompt),
+        system_prompt_kwargs={"cli_mode": True},
+    )
 
 
 def status(slug: str, role: str | None) -> int:
     root = STATE / slug / "roles"
     rows = []
     now = time.time()
-    for record in sorted(root.glob("*/*/record.json"), key=lambda p: p.stat().st_mtime,
-                         reverse=True)[:10]:
+    for record in sorted(root.glob("*/*/record.json"), key=lambda p: p.stat().st_mtime, reverse=True)[:10]:
         data = json.loads(record.read_text(encoding="utf-8"))
         if role and data.get("role") != role:
             continue
@@ -244,10 +337,17 @@ def status(slug: str, role: str | None) -> int:
                 alive = True
             except OSError:
                 alive = False
-        rows.append({"role": data.get("role"), "state": data.get("state"), "alive": alive,
-                     "started": data.get("started"), "model": data.get("model"),
-                     "last_log_seconds_ago": int(now - log.stat().st_mtime) if log.exists() else None,
-                     "run_dir": str(record.parent)})
+        rows.append(
+            {
+                "role": data.get("role"),
+                "state": data.get("state"),
+                "alive": alive,
+                "started": data.get("started"),
+                "model": data.get("model"),
+                "last_log_seconds_ago": int(now - log.stat().st_mtime) if log.exists() else None,
+                "run_dir": str(record.parent),
+            }
+        )
     print(json.dumps({"runs": rows}, ensure_ascii=False, indent=1))
     return 0
 
@@ -266,15 +366,23 @@ def main() -> int:
     ap.add_argument("--model")
     ap.add_argument("--out", help="extra line for the prompt: where the artefacts go")
     ap.add_argument("--iterations", type=int, default=60)
-    ap.add_argument("--budget", type=float, default=2.0)
+    ap.add_argument(
+        "--budget", type=float, default=None, help="optional cap in OpenRouter list dollars; no cap by default"
+    )
     ap.add_argument("--timeout", type=int, default=2400)
     ap.add_argument("--status", action="store_true")
-    ap.add_argument("--allow-dirty", action="store_true",
-                    help="start even when the worktree has uncommitted or unmerged paths "
-                         "(resolving a merge conflict is the work itself)")
-    ap.add_argument("--read-only", action="store_true",
-                    help="the role must not change the workspace (implied by the reviewer roles); "
-                         "the report is the final message, saved to --report")
+    ap.add_argument(
+        "--allow-dirty",
+        action="store_true",
+        help="start even when the worktree has uncommitted or unmerged paths "
+        "(resolving a merge conflict is the work itself)",
+    )
+    ap.add_argument(
+        "--read-only",
+        action="store_true",
+        help="the role must not change the workspace (implied by the reviewer roles); "
+        "the report is the final message, saved to --report",
+    )
     args = ap.parse_args()
 
     if args.status:
@@ -300,13 +408,19 @@ def main() -> int:
     if dirty:
         print(f"note: starting on a dirty worktree ({len(dirty.splitlines())} paths)", file=sys.stderr)
 
-    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
     run_dir = STATE / args.project / "roles" / args.role / stamp
     run_dir.mkdir(parents=True, exist_ok=True)
     log_path = run_dir / "log.txt"
     record_path = run_dir / "record.json"
-    record = {"role": args.role, "state": "starting", "pid": os.getpid(), "started": stamp,
-              "base": base, "model": model}
+    record = {
+        "role": args.role,
+        "state": "starting",
+        "pid": os.getpid(),
+        "started": stamp,
+        "base": base,
+        "model": model,
+    }
     record_path.write_text(json.dumps(record, ensure_ascii=False, indent=1), encoding="utf-8")
 
     system_prompt = role_prompt(args.role, args.verify)
@@ -320,12 +434,28 @@ def main() -> int:
 
     os.environ.setdefault("OPENHANDS_SUPPRESS_BANNER", "1")
     agent = build_agent(cfg, args.role, model, system_prompt)
-    from openhands.sdk import Conversation  # noqa: E402
-    conversation = Conversation(agent=agent, workspace=str(worktree),
-                                max_iteration_per_run=args.iterations,
-                                max_budget_per_run=args.budget)
+    from openhands.sdk import Conversation
 
-    def on_timeout(signum, frame):  # noqa: ARG001
+    # No cap unless the operator asks for one. The owner's rule: no limits until limits are decided from
+    # measured statistics, and reasoning that looks expensive is not by itself a reason to stop a run.
+    # A cap, when given, is in list dollars and is scaled into the currency the runtime bills in.
+    budget = None
+    if args.budget is not None:
+        scale = budget_scale(model)
+        budget = args.budget * scale
+        if scale == 1.0:
+            print("note: no price pair for this model; the cap stays in gateway currency", file=sys.stderr)
+        else:
+            print(
+                f"note: cap {args.budget:.4g} list-prices = {budget:.4g} gateway units "
+                f"(gateway prices are {scale:.0f}x list for {model})",
+                file=sys.stderr,
+            )
+    conversation = Conversation(
+        agent=agent, workspace=str(worktree), max_iteration_per_run=args.iterations, max_budget_per_run=budget
+    )
+
+    def on_timeout(signum, frame):
         raise TimeoutError(f"the role did not finish in {args.timeout}s")
 
     started = time.time()
@@ -348,9 +478,10 @@ def main() -> int:
                     "You have not changed a single file. The task is not done: the artefacts of this "
                     "role are files in the workspace, and an unchanged workspace means no work was "
                     "done. Do it now — read what you need, then write or edit the files, then run "
-                    "the acceptance command. Do not reply with a plan or a summary.")
+                    "the acceptance command. Do not reply with a plan or a summary."
+                )
                 conversation.run()
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             error = f"{type(exc).__name__}: {exc}"
         finally:
             signal.alarm(0)
@@ -366,10 +497,10 @@ def main() -> int:
     # a file, so the report outlives the log and can be quoted to the owner.
     report_text = ""
     try:
-        from openhands.sdk.conversation import get_agent_final_response  # noqa: E402
+        from openhands.sdk.conversation import get_agent_final_response
 
         report_text = get_agent_final_response(conversation.state.events) or ""
-    except Exception as exc:  # noqa: BLE001 — a missing report must not hide the run itself
+    except Exception as exc:
         print(f"note: could not read the final message: {exc}", file=sys.stderr)
     if report_text.strip():
         (run_dir / "report.md").write_text(report_text, encoding="utf-8")
@@ -383,7 +514,7 @@ def main() -> int:
             for event in events:
                 try:
                     dump.write(event.model_dump_json() + "\n")
-                except Exception:  # noqa: BLE001 — an event we cannot serialise must not stop the dump
+                except Exception:
                     dump.write(json.dumps({"type": type(event).__name__, "repr": repr(event)[:2000]}) + "\n")
         lines = []
         for event in events:
@@ -399,12 +530,19 @@ def main() -> int:
             elif kind == "ObservationEvent":
                 lines.append(f"[obs] {str(getattr(event, 'observation', ''))[:1500]}")
         (run_dir / "transcript.md").write_text("\n\n".join(lines), encoding="utf-8")
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         print(f"note: could not dump the conversation: {exc}", file=sys.stderr)
 
-    result = {"ok": False, "role": args.role, "model": model, "commit": None,
-              "usage": usage, "run_dir": str(run_dir), "error": error,
-              "report": str(run_dir / "report.md") if report_text.strip() else None}
+    result = {
+        "ok": False,
+        "role": args.role,
+        "model": model,
+        "commit": None,
+        "usage": usage,
+        "run_dir": str(run_dir),
+        "error": error,
+        "report": str(run_dir / "report.md") if report_text.strip() else None,
+    }
     if error:
         record.update({"state": "failed", "result": result})
         record_path.write_text(json.dumps(record, ensure_ascii=False, indent=1), encoding="utf-8")
@@ -418,11 +556,9 @@ def main() -> int:
         # write. A reviewer that edits the branch under review has destroyed the evidence.
         if changed or not report_text.strip():
             result["violations"] = changed
-            result["error"] = ("read-only role changed the worktree" if changed
-                               else "read-only role produced no report")
+            result["error"] = "read-only role changed the worktree" if changed else "read-only role produced no report"
             record.update({"state": "failed", "result": result})
-            record_path.write_text(json.dumps(record, ensure_ascii=False, indent=1),
-                                   encoding="utf-8")
+            record_path.write_text(json.dumps(record, ensure_ascii=False, indent=1), encoding="utf-8")
             print(json.dumps(result, ensure_ascii=False, indent=1))
             return 1
         result["ok"] = True
@@ -432,8 +568,9 @@ def main() -> int:
         return 0
     if args.allowed:
         allowed = [a.strip() for a in args.allowed.split(",") if a.strip()]
-        violations = [f for f in result["changed"]
-                      if not any(f == a or f.startswith(a.rstrip("/") + "/") for a in allowed)]
+        violations = [
+            f for f in result["changed"] if not any(f == a or f.startswith(a.rstrip("/") + "/") for a in allowed)
+        ]
         result["violations"] = violations
         if violations:
             result["ok"] = False
@@ -444,17 +581,22 @@ def main() -> int:
 
     verify = None
     if args.verify:
-        proc = subprocess.run(args.verify, shell=True, cwd=worktree, capture_output=True, text=True,
-                              timeout=900)
-        verify = {"command": args.verify, "exit": proc.returncode,
-                  "tail": (proc.stdout + proc.stderr)[-1500:]}
+        proc = subprocess.run(args.verify, shell=True, cwd=worktree, capture_output=True, text=True, timeout=900)
+        verify = {"command": args.verify, "exit": proc.returncode, "tail": (proc.stdout + proc.stderr)[-1500:]}
         result["verify"] = verify
 
     if changed and (verify is None or verify["exit"] == 0):
         git(worktree, "add", "-A")
-        commit = git(worktree, "-c", "user.name=cascade-" + args.role,
-                     "-c", "user.email=cascade@localhost", "commit",
-                     "-m", f"{args.role}: {request.strip().splitlines()[0][:80]}")
+        commit = git(
+            worktree,
+            "-c",
+            "user.name=cascade-" + args.role,
+            "-c",
+            "user.email=cascade@localhost",
+            "commit",
+            "-m",
+            f"{args.role}: {request.strip().splitlines()[0][:80]}",
+        )
         if commit.returncode == 0:
             result["commit"] = git(worktree, "rev-parse", "HEAD").stdout.strip()
             result["ok"] = True

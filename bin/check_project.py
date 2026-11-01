@@ -7,15 +7,15 @@
 
 Exit 0 — всё задано; 1 — чего-то не хватает (список в stderr).
 """
+
 from __future__ import annotations
 
 import os
 import re
 import sys
 
-ROLES = ("architect", "chief_architect", "specifier", "executor", "arbiter", "reviewer",
-         "vision")
-UI_ROLES = ("designer",)      # required when the project declares `ui: true`
+ROLES = ("architect", "chief_architect", "specifier", "executor", "arbiter", "reviewer", "vision")
+UI_ROLES = ("designer",)  # required when the project declares `ui: true`
 
 
 def _clean(raw: str) -> str:
@@ -33,11 +33,11 @@ def parse_flat(path: str) -> dict[str, dict[str, str]]:
         line = raw.rstrip("\n")
         if not line.strip() or line.lstrip().startswith("#"):
             continue
-        m = re.match(r"^  (\w+):\s*(.*)$", line)          # вложенный ключ
+        m = re.match(r"^  (\w+):\s*(.*)$", line)  # вложенный ключ
         if m:
             out.setdefault(section, {})[m.group(1)] = _clean(m.group(2))
             continue
-        m = re.match(r"^(\w+):\s*(.*)$", line)             # верхний ключ
+        m = re.match(r"^(\w+):\s*(.*)$", line)  # верхний ключ
         if m:
             key, val = m.group(1), m.group(2).strip()
             if val:
@@ -65,8 +65,7 @@ def main() -> int:
     missing = [r for r in required if not models.get(r)]
     if missing:
         print(f"ERROR: {slug}: не заданы модели ролей: {', '.join(missing)}", file=sys.stderr)
-        print(f"       заполните ~/.config/cascade/projects/{slug}.yaml → models:",
-              file=sys.stderr)
+        print(f"       заполните ~/.config/cascade/projects/{slug}.yaml → models:", file=sys.stderr)
         return 1
 
     key_ref = cfg.get("_", {}).get("key_ref") or "LITELLM_KEY"

@@ -10,6 +10,10 @@ Read this first, then only the files the task actually touches. Everything here 
 | Roadmap and open questions | `PLAN.md` | before picking the next task |
 | Scripts | `bin/` | the only way to run a phase; no manual steps |
 | Configuration | `config/` + `config/README.md` | canonical prompts, plan schema, `*.example.yaml`; the live settings are in `~/.config/cascade`, symlinked back to this directory |
+| Process rules | `.agents/rules/workflow.md` | before any task, and before opening a pull request |
+| Code style | `.agents/rules/code_style.md` | before editing `bin/`, `config/` or `tests/` |
+| Testing | `.agents/rules/testing.md` | before writing or editing tests |
+| Configuration and data | `.agents/rules/config.md` | before touching `config/` or adding a value a script reads |
 
 ## Rules that are not negotiable
 
@@ -28,6 +32,32 @@ Read this first, then only the files the task actually touches. Everything here 
    run records: outside. Chapters, decisions, evidence notes: inside.
 8. **Local imports are forbidden** in product code; a circular import is a question for the human
    with options, never a workaround with an import inside a function.
+9. **No environment-specific defaults in code.** A gateway URL, a proxy, a hostname or a home path as
+   a fallback works on one machine and hides that it was never configured. Project config → variable →
+   fail with an instruction. `bin/rig_conf.py` is the only resolver.
+10. **The rig develops itself.** A change to `bin/`, `config/` or a gate becomes a card that the
+   cascade executes; the orchestrator opens cards, arbitrates and merges. Hooks and CI wiring are the
+   declared exception, written by the orchestrator with the debt recorded.
+11. **No accumulated tech debt.** A problem found inside a task is fixed inside that task — same card,
+   same pull request. If it cannot be (a contract or a rule another task depends on, a decision the
+   task does not own, a cost past the task's budget), ask the human before finishing, with the options
+   and a recommendation. A card records the human's decision; it is not a way to avoid asking.
+
+## Commands
+
+Hooks are versioned: `git config core.hooksPath .githooks` once per clone (the pre-commit hook refuses
+to commit a staged file that also has unstaged edits, because the formatter would take them).
+
+```bash
+python3 -m ruff check . && python3 -m ruff format --check .   # or: make lint / make fmt
+python3 -m pytest                                            # or: make test
+python3 -m pytest -m property                                # or: make property
+python3 -m mutmut run --paths-to-mutate=bin/<module>.py      # or: make mutation MUTATE=bin/<module>.py
+semgrep --config .semgrep.yml --severity ERROR --error       # the environment-defaults rule lives here
+gitleaks detect --no-git --redact --source .                 # secrets, seconds
+```
+
+`make` may be missing on a developer machine; the commands above are the same gates without it.
 
 ## Language
 

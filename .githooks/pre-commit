@@ -1,0 +1,58 @@
+#!/bin/sh
+# Local pre-commit: ruff check + ruff format on the staged Python files.
+#
+# Why this exists: formatting used to fail in CI, which turned a one-line fix into a second commit
+# and a red pull request. The hook is versioned with the code (see AGENTS.md: core.hooksPath) so
+# every clone gets the same behaviour instead of each machine's private hooks.
+#
+# A machine without ruff must still be able to commit: the hook warns and lets the commit through,
+# because a broken hook blocks all work while a missed format pass only blocks CI.
+
+staged=$(git diff --cached --name-only --diff-filter=ACM -- '*.py')
+[ -z "$staged" ] && exit 0
+
+# Candidates are tested by running them, not by checking that a file exists: a worktree has no
+# .venv, and an existence check there picks an interpreter that cannot be executed.
+pick_ruff() {
+  for candidate in \
+    ".venv/bin/python -m ruff" \
+    "uv run --offline --frozen ruff" \
+    "python3 -m ruff" \
+    "ruff"; do
+    if $candidate --version >/dev/null 2>&1; then
+      printf '%s\n' "$candidate"
+      return 0
+    fi
+  done
+  return 1
+}
+
+RUFF=$(pick_ruff)
+if [ -z "$RUFF" ]; then
+  echo "pre-commit: ruff not found, skipping lint and format (CI will check them)"
+  exit 0
+fi
+
+# A formatter rewrites the whole file on disk, and re-adding that file would commit unstaged edits
+# the author did not intend to include. Refuse instead of silently taking them.
+unstaged=$(git diff --name-only -- $staged)
+if [ -n "$unstaged" ]; then
+  echo "pre-commit: these files have unstaged changes, and the formatter would commit them:"
+  printf '%s\n' "$unstaged" | sed 's/^/  /'
+  echo "pre-commit: stage the whole file (git add <path>) or stash the rest, then commit again."
+  exit 1
+fi
+
+echo "pre-commit: ruff check --fix / ruff format"
+# shellcheck disable=SC2086
+$RUFF check --fix $staged || {
+  echo "pre-commit: ruff check reported errors after --fix; fix them and commit again"
+  exit 1
+}
+# shellcheck disable=SC2086
+$RUFF format $staged || exit 1
+
+# The fixers may have rewritten files: stage them again so the commit carries the formatted code.
+# shellcheck disable=SC2086
+git add -- $staged
+exit 0
