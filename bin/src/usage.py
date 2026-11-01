@@ -15,7 +15,7 @@
   price    [--refresh]      обновить кэш цен из /model/info шлюза
                            (~/.config/cascade/pricing.json — a cache, regenerated from the
                            gateway when missing; for money in the owner's currency use
-                           bin/prices_openrouter.py instead)
+                           src/prices_openrouter.py instead)
 
   projects                  список проектов с данными
 
@@ -37,7 +37,7 @@ from collections import defaultdict
 from datetime import UTC, datetime
 from pathlib import Path
 
-from rig_conf import gateway, project_config
+from .rig_conf import gateway, project_config
 
 STATE = Path(os.environ.get("XDG_STATE_HOME", Path.home() / ".local/state")) / "cascade"
 CONFIG = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "cascade"

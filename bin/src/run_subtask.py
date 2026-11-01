@@ -32,12 +32,10 @@ import time
 from datetime import UTC, datetime
 from pathlib import Path
 
-from rig_conf import gateway
+from .rig_conf import gateway
 
 BIN = Path(__file__).resolve().parent
-sys.path.insert(0, str(BIN))
-
-from plan_task import CONFIG, STATE, load_keys, parse_simple_yaml, token_limit  # noqa: E402
+from .plan_task import CONFIG, STATE, load_keys, parse_simple_yaml, token_limit
 
 OH_VENV = Path.home() / "soft" / "openhands" / ".venv"
 BIN_PY = OH_VENV / "bin" / "python"

@@ -31,9 +31,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 BIN = Path(__file__).resolve().parent
-sys.path.insert(0, str(BIN))
-
-from plan_task import (  # noqa: E402
+from .plan_task import (  # noqa: E402
     HOUSE_RULES,
     STATE,
     call_model_stream,

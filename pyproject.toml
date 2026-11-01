@@ -42,7 +42,7 @@ ignore = ["S101"]  # asserts are the point of a test
 "tools/**" = ["S310", "S603", "S607"]
 
 [tool.pytest.ini_options]
-testpaths = ["tests"]
+testpaths = ["tests", "bin/tests"]
 pythonpath = ["bin"]
 addopts = "-q"
 # Property-based tests default to many more examples than a unit test needs; the cap keeps CI honest.

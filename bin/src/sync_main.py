@@ -22,7 +22,7 @@ import json
 import subprocess
 from pathlib import Path
 
-from rig_conf import REPOS_ENV, repos
+from .rig_conf import REPOS_ENV, repos
 
 
 def git(repo: Path, *args: str) -> subprocess.CompletedProcess:

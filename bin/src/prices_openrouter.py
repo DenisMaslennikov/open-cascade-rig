@@ -26,7 +26,7 @@ import sys
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-from rig_conf import KEYS, PRICES_PROXY_ENV, proxy
+from .rig_conf import KEYS, PRICES_PROXY_ENV, proxy
 
 STATE = Path(os.environ.get("XDG_STATE_HOME", Path.home() / ".local" / "state")) / "cascade"
 CACHE = STATE / "pricing-openrouter.json"
