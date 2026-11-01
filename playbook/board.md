@@ -7,13 +7,20 @@ cosmetic problem; it is the wrong status shown to the person paying for the work
 
 ## Procedure
 
+- The board follows GitHub by itself: `tools/board/sync.py` (`.github/workflows/board.yml`) runs on
+  every pull-request event and derives the whole state from the pull requests — PR open → `Review`,
+  merged → `Done`, closed unmerged → `Plan`, and an unblocked `Backlog` card fills a free `Plan`
+  slot, highest priority first. `max_plan` in `tools/board/policy.json` caps that queue.
+- A pull request names its card at the start of the title: `[#174] chore: …`. The `PR title names a
+  card` job rejects a title without the `[#<card>]` prefix. Since GitHub appends `(#8)`, a bare
+  `#8` in a title is the pull-request number and links nothing.
 - Start of session: `bin/board_archive.py --project <slug> --status` — columns, card count, orphans
-  (cards in no bucket), archived count.
-- Each phase moves its own card, in the same action as the work: plan ready → `Plan`, tests frozen →
-  `Tests`, executor green → `Code`, review running → `Review`, merged → archived.
+  (cards in no bucket), archived count. The sync repairs orphans and done-drift itself.
+- Each phase keeps its card honest by opening its PR under the card's marker; the column follows.
 - Archive = `done` + the `Done` column, in one idempotent call:
-  `bin/board_archive.py --project <slug> --cards 15,16 --note "PR #3 merged"`. It re-reads the board
-  afterwards instead of trusting the response code.
+  `bin/board_archive.py --project <slug> --cards 15,16 --note "PR #3 merged"` — a manual fallback
+  for a merged PR that carried no marker. It re-reads the board afterwards instead of trusting the
+  response code.
 - A card that is not the current one stays where it is: moving it "for neatness" destroys the history
   the owner reads.
 
