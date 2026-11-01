@@ -366,7 +366,9 @@ def main() -> int:
     ap.add_argument("--model")
     ap.add_argument("--out", help="extra line for the prompt: where the artefacts go")
     ap.add_argument("--iterations", type=int, default=60)
-    ap.add_argument("--budget", type=float, default=2.0)
+    ap.add_argument(
+        "--budget", type=float, default=None, help="optional cap in OpenRouter list dollars; no cap by default"
+    )
     ap.add_argument("--timeout", type=int, default=2400)
     ap.add_argument("--status", action="store_true")
     ap.add_argument(
@@ -434,16 +436,21 @@ def main() -> int:
     agent = build_agent(cfg, args.role, model, system_prompt)
     from openhands.sdk import Conversation
 
-    scale = budget_scale(model)
-    budget = args.budget * scale
-    if scale == 1.0:
-        print("note: no price pair for this model; the run budget stays in gateway currency", file=sys.stderr)
-    else:
-        print(
-            f"note: run budget {args.budget:.4g} list-prices = {budget:.4g} gateway units "
-            f"(gateway prices are {scale:.0f}x list for {model})",
-            file=sys.stderr,
-        )
+    # No cap unless the operator asks for one. The owner's rule: no limits until limits are decided from
+    # measured statistics, and reasoning that looks expensive is not by itself a reason to stop a run.
+    # A cap, when given, is in list dollars and is scaled into the currency the runtime bills in.
+    budget = None
+    if args.budget is not None:
+        scale = budget_scale(model)
+        budget = args.budget * scale
+        if scale == 1.0:
+            print("note: no price pair for this model; the cap stays in gateway currency", file=sys.stderr)
+        else:
+            print(
+                f"note: cap {args.budget:.4g} list-prices = {budget:.4g} gateway units "
+                f"(gateway prices are {scale:.0f}x list for {model})",
+                file=sys.stderr,
+            )
     conversation = Conversation(
         agent=agent, workspace=str(worktree), max_iteration_per_run=args.iterations, max_budget_per_run=budget
     )
