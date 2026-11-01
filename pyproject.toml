@@ -33,9 +33,10 @@ ignore = ["S101"]  # asserts are the point of a test
   "F841",  # an unused `by_id` in validate_plan — dead code, removed by the debt card
   "B007",  # an unused loop counter in the review loop, kept for its log line, cleaned by the card
 ]
-# A real defect found by this gate, not fixed here: the fix belongs to a card that the cascade runs
-# (AGENTS.md rule 10). Card #182 owns it; delete this line in the pull request that fixes `brief`.
-"bin/schema_design.py" = ["F821", "B007", "E741"]
+# The two findings this module still carries. F821 was here until card #182: `brief` is now bound
+# from `--request` in the design branch, so the undefined name is gone rather than suppressed.
+# Card #183 removes the rest together with the other recorded debt.
+"bin/schema_design.py" = ["B007", "E741"]
 # tools/board talks to Vikunja and GitHub over urllib and calls `gh`: the URL is built from config,
 # not from user input, so S310/S603/S607 are by-design here rather than debt.
 "tools/**" = ["S310", "S603", "S607"]
