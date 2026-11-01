@@ -1,5 +1,8 @@
-# Runtime state and secrets never enter the repository.
+# Runtime state, caches and secrets never enter the repository.
 state/
+# price caches: the gateway snapshot and the OpenRouter catalogue are data, not knowledge
+pricing.json
+pricing-openrouter.json
 logs/
 *.log
 *.env

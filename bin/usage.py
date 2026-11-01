@@ -13,7 +13,9 @@
            сводка: общий итог, по фичам, по задачам, по моделям
 
   price    [--refresh]      обновить кэш цен из /model/info шлюза
-                           (~/.config/cascade/pricing.json)
+                           (~/.config/cascade/pricing.json — a cache, regenerated from the
+                           gateway when missing; for money in the owner's currency use
+                           bin/prices_openrouter.py instead)
 
   projects                  список проектов с данными
 

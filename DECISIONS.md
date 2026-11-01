@@ -91,7 +91,7 @@ Hermes управляет фазами, запускает процессы, с�
 ### D14. Учёт токенов и денег — три уровня, append-only
 - Уровни: **проект → фича → задача**. Хранилище — `~/.local/state/cascade/<project>/usage.jsonl`, одно событие на вызов модели (ts, project, feature, task, role, model, input/output tokens, cache_read, cost).
 - Почему JSONL, а не один JSON: параллельные агенты пишут без read-modify-write и без гонок, любая сводка считается из лога.
-- Инструменты в `~/.config/cascade/bin/usage.py`: `record` (цена по кэшу `pricing.json`, обновление — `price --refresh`), `report [-p проект] [--feature F] [--task T] [--json]`, `projects`.
+- Инструменты в `~/.config/cascade/bin/usage.py`: `record` (токены; цена по кэшу `pricing.json`, обновление — `price --refresh`), `report [-p проект] [--feature F] [--task T] [--json]`, `projects`. Кэш цен в репозиторий не попадает: он машинный и пересоздаётся из шлюза. Деньги для владельца считает `bin/prices_openrouter.py` по публичному прайсу OpenRouter — шлюзовые цены в отчётах и в репозитории не используются.
 - Правило: задача не считается закрытой, пока её вызовы не записаны в ledger и стоимость не приложена к карточке. Валюта — та, в которой биллит шлюз.
 
 ### D15. Модель ветвления и ревью
