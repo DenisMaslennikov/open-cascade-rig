@@ -165,7 +165,16 @@ class _RailHTTPRequestHandler(SimpleHTTPRequestHandler):
                 return
 
             file_path = self._static_dir / path
-            if not file_path.is_file() or not file_path.is_relative_to(self._static_dir):
+            # Check if file path is within static directory after resolving symlinks
+            try:
+                resolved_file_path = file_path.resolve()
+                resolved_static_dir = self._static_dir.resolve()
+                if not resolved_file_path.is_file() or not resolved_file_path.is_relative_to(resolved_static_dir):
+                    self.send_response(404)
+                    self.end_headers()
+                    return
+            except (OSError, ValueError):
+                # If we can't resolve the path, deny access
                 self.send_response(404)
                 self.end_headers()
                 return

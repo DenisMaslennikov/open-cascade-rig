@@ -248,25 +248,29 @@ def _wait_for_interrupt() -> None:
     """Block the calling thread until the process is interrupted, then return normally.
 
     `main` waits here between printing the URL and stopping the server. The block ends when the
-    process receives `SIGINT` (Ctrl+C): the `KeyboardInterrupt` is swallowed here, so the caller
+    process receives `SIGINT` (Ctrl+C) or `SIGTERM`: the `KeyboardInterrupt` is swallowed here, so the caller
     keeps the exit path of an ordinary return. It is a function of its own so a test can drive
     `main` through an injected server without a real interrupt.
     """
     try:
         import signal
-        import time
+        import threading
 
-        # Set up signal handler to catch SIGINT
+        # Event to signal shutdown
+        shutdown_event = threading.Event()
+
+        # Set up signal handlers to trigger shutdown
         def signal_handler(sig, frame):
-            pass  # We just want to interrupt the sleep
+            shutdown_event.set()
 
         signal.signal(signal.SIGINT, signal_handler)
+        signal.signal(signal.SIGTERM, signal_handler)
 
-        # Sleep indefinitely until interrupted
-        while True:
-            time.sleep(1)
+        # Sleep until shutdown event is triggered
+        while not shutdown_event.is_set():
+            shutdown_event.wait(timeout=1.0)
     except KeyboardInterrupt:
-        # KeyboardInterrupt is caught and ignored as per specification
+        # Allow KeyboardInterrupt to propagate to let the main thread handle cleanup
         pass
 
 
