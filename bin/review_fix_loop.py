@@ -116,7 +116,7 @@ def main() -> int:
     ap.add_argument(
         "--budget",
         type=float,
-        default=4.0,
+        default=None,
         help="per-round agent budget in USD; a review that reads a repository costs "
         "more than the 2.0 default of run_role and dies mid-read",
     )
@@ -186,7 +186,9 @@ def main() -> int:
             ]
             if args.model:
                 review_cmd += ["--model", args.model]
-            review_cmd += ["--budget", str(args.budget), "--iterations", str(args.iterations)]
+            review_cmd += ["--iterations", str(args.iterations)]
+            if args.budget is not None:  # no cap unless the operator asked for one
+                review_cmd += ["--budget", str(args.budget)]
             review, code, tail = run_json(review_cmd, worktree, timeout=3600)
             report_path = review.get("report")
         report = Path(report_path).read_text(encoding="utf-8") if report_path and Path(report_path).exists() else ""
