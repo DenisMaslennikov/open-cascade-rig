@@ -48,7 +48,7 @@ addopts = "-q"
 markers = ["property: hypothesis-driven, seconds per test"]
 
 [tool.mutmut]
-# Mutation runs only over the module a pull request touched, and only through the Makefile target:
-# a whole-repository run is minutes of CPU for a signal nobody reads.
-paths_to_mutate = "bin/"
-tests_dir = "tests/"
+# Mutmut 3.x keys (the 2.x keys `paths_to_mutate`/`tests_dir` crash 3.8.1: mutmut concatenates
+# `tests_dir` onto a list, and `--paths-to-mutate` no longer exists, which kills the Makefile target).
+source_paths = ["bin/"]
+pytest_add_cli_args_test_selection = ["tests/"]
