@@ -132,6 +132,20 @@ def test_projects_are_listed_by_slug_and_archived_ones_are_skipped():
     assert [(p.id, p.slug) for p in projects] == [(7, "cascade-rig")]
 
 
+def test_a_page_of_archived_projects_does_not_end_the_walk():
+    """The project list is paged; a page whose projects are all archived says nothing about the pages
+    after it, so the walk must not stop there (a review finding on PR #8)."""
+    first = [{"id": 9, "title": "Old — archived", "is_archived": True}]
+    second = [{"id": 7, "title": "cascade-rig — отладка", "is_archived": False}]
+
+    class PagedProjects(FakeTransport):
+        def request(self, method: str, path: str, body=None, token=None):
+            return (200, first) if "page=1&" in path else (200, second)
+
+    board = vk.VikunjaClient(BASE, token="test-token", transport=PagedProjects({}))
+    assert [project.id for project in board.projects()] == [7]
+
+
 def test_a_project_is_found_by_slug_and_by_number():
     board = client(routes())
     assert board.project("cascade-rig").id == 7
