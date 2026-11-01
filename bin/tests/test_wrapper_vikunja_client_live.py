@@ -14,7 +14,7 @@ from pathlib import Path
 
 import pytest
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools" / "wrapper"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "tools" / "wrapper"))
 
 import vikunja_client as vk
 

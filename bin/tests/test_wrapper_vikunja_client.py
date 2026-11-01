@@ -18,7 +18,7 @@ import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools" / "wrapper"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "tools" / "wrapper"))
 
 import vikunja_client as vk
 
@@ -100,7 +100,7 @@ def client(routes_: dict, **kwargs) -> vk.VikunjaClient:
 def test_the_module_is_importable_through_the_package_path_the_rail_task_uses():
     """Subtask 184.2 imports `tools.wrapper.vikunja_client` from the repository root; a rename or a
     wrapper `__init__.py` that changes the path would break it without any test noticing."""
-    root = str(Path(__file__).resolve().parents[1])
+    root = str(Path(__file__).resolve().parents[2])
     sys.path.insert(0, root)
     try:
         module = importlib.import_module("tools.wrapper.vikunja_client")

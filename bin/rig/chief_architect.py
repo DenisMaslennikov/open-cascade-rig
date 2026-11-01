@@ -36,10 +36,7 @@ import sys
 from datetime import UTC, datetime
 from pathlib import Path
 
-from .rig_conf import gateway
-
-BIN = Path(__file__).resolve().parent
-from .plan_task import (  # noqa: E402
+from .plan_task import (
     CONFIG,
     HOUSE_RULES,
     STATE,
@@ -49,6 +46,9 @@ from .plan_task import (  # noqa: E402
     repo_map,
     token_limit,
 )
+from .rig_conf import gateway
+
+BIN = Path(__file__).resolve().parent
 
 MAX_FILE_CHARS = 20000
 MAX_REQUEST_CHARS = 20000

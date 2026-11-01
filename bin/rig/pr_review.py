@@ -26,10 +26,10 @@ import sys
 from datetime import UTC, datetime
 from pathlib import Path
 
+from .plan_task import CONFIG, STATE, load_keys, parse_simple_yaml
 from .rig_conf import gateway, project_config
 
 BIN = Path(__file__).resolve().parent
-from .plan_task import CONFIG, STATE, load_keys, parse_simple_yaml
 
 VENV = Path.home() / ".hermes" / "cache" / "scratch" / "pragent-venv"
 PR_AGENT = VENV / "bin" / "pr-agent"

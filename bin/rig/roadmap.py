@@ -33,7 +33,6 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
 from pathlib import Path
 
-BIN = Path(__file__).resolve().parent
 from .plan_task import (  # the gateway plumbing lives in one place
     HOUSE_RULES,
     STATE,
@@ -42,6 +41,8 @@ from .plan_task import (  # the gateway plumbing lives in one place
     project_config,
     repo_map,
 )
+
+BIN = Path(__file__).resolve().parent
 
 MAX_REQUEST_CHARS = 30000
 

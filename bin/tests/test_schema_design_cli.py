@@ -10,9 +10,9 @@ branch's own binding.
 from __future__ import annotations
 
 import sys
+from pathlib import Path
 
 import pytest
-
 from rig import schema_design
 
 # What a successful `generate` returns; empty on purpose, the branch under test is the call itself.

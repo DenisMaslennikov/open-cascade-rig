@@ -30,8 +30,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
 from pathlib import Path
 
-BIN = Path(__file__).resolve().parent
-from .plan_task import (  # noqa: E402
+from .plan_task import (
     HOUSE_RULES,
     STATE,
     call_model_stream,
@@ -39,6 +38,8 @@ from .plan_task import (  # noqa: E402
     project_config,
     repo_map,
 )
+
+BIN = Path(__file__).resolve().parent
 
 BAD_MONEY_TYPES = {"float", "float4", "float8", "double", "double precision", "real"}
 

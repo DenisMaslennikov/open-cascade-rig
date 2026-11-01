@@ -32,10 +32,10 @@ import time
 from datetime import UTC, datetime
 from pathlib import Path
 
+from .plan_task import CONFIG, STATE, load_keys, parse_simple_yaml, token_limit
 from .rig_conf import gateway
 
 BIN = Path(__file__).resolve().parent
-from .plan_task import CONFIG, STATE, load_keys, parse_simple_yaml, token_limit
 
 OH_VENV = Path.home() / "soft" / "openhands" / ".venv"
 BIN_PY = OH_VENV / "bin" / "python"
@@ -264,7 +264,11 @@ def status(slug: str) -> int:
 def main() -> int:
     # the SDK lives in its own interpreter (3.12); re-exec so the caller never has to know
     if BIN_PY.exists() and Path(sys.executable).resolve() != BIN_PY.resolve():
-        os.execv(str(BIN_PY), [str(BIN_PY), str(Path(__file__).resolve()), *sys.argv[1:]])
+        # Re-exec as a module, never by file path: the child needs `rig` as its parent package or
+        # every relative import fails. `bin` goes on the child's PYTHONPATH so any cwd works.
+        pythonpath = os.pathsep.join(filter(None, (str(BIN), os.environ.get("PYTHONPATH"))))
+        argv = [str(BIN_PY), "-m", "rig.run_subtask", *sys.argv[1:]]
+        os.execve(str(BIN_PY), argv, {**os.environ, "PYTHONPATH": pythonpath})
     ap = argparse.ArgumentParser(description="Run the executor on one subtask and gate it.")
     ap.add_argument("--project", required=True)
     ap.add_argument("--plan")
