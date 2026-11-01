@@ -188,8 +188,7 @@ def main() -> int:
     epic_label = labels.get("epic")
     if not epic_label:
         # Контейнерная карточка (этап): sync её не двигает, иначе все этапы уезжают в Plan.
-        epic_label = board.create_label("epic", "8e44ad",
-                                        "Контейнерная карточка (этап, бриф), а не работа")
+        epic_label = board.create_label("epic", "8e44ad", "Контейнерная карточка (этап, бриф), а не работа")
     designer_label = labels.get(f"{args.project.upper()} · designer")
     if not designer_label:
         designer_label = board.create_label(f"{args.project.upper()} · designer", "d94f8a", "Задачи роли designer")
