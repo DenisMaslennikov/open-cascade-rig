@@ -194,6 +194,20 @@ def _narrow_blockers(payload: Any) -> tuple[Blocker, ...]:
     )
 
 
+def _require_list(payload: Any, path: str) -> list[Any]:
+    """Return the payload as a list, or say the board answered with the wrong type.
+
+    An empty `{}` — what an empty answer body decodes to — and `None` stand for an empty list, as
+    they do throughout JSON APIs; anything else that is not a list is a board or proxy error, not
+    something to iterate over.
+    """
+    if payload is None or payload == {}:
+        return []
+    if isinstance(payload, list):
+        return payload
+    raise VikunjaError(f"GET {path}: the board answered with {type(payload).__name__}, expected a JSON list")
+
+
 class VikunjaClient:
     """Reads projects and the cards of the `Plan` column from one Vikunja instance.
 
@@ -279,14 +293,15 @@ class VikunjaClient:
 
         Raises:
             VikunjaHTTPError: When the board answers with an error status.
+            VikunjaError: When a page answers with something other than a list.
         """
         seen_ids: set[int] = set()
         seen_slugs: set[str] = set()
         out: list[Project] = []
         for page in range(1, 101):
-            payloads = self._request("GET", f"/projects?page={page}&per_page=100") or []
+            path = f"/projects?page={page}&per_page=100"
             fresh = 0
-            for payload in payloads if isinstance(payloads, list) else []:
+            for payload in _require_list(self._request("GET", path), path):
                 if not isinstance(payload, dict) or payload.get("is_archived"):
                     continue
                 pid = _int(payload.get("id"))
@@ -345,10 +360,12 @@ class VikunjaClient:
         Raises:
             UnknownProject: When no project matches.
             VikunjaHTTPError: When the board answers with an error status.
-            VikunjaError: When the project has no kanban view or the view has no `Plan` column.
+            VikunjaError: When a list the board sends is of another type, when the project has no
+                kanban view or the view has no `Plan` column.
         """
         pid = self.project(project).id
-        views = self._request("GET", f"/projects/{pid}/views") or []
+        views_path = f"/projects/{pid}/views"
+        views = _require_list(self._request("GET", views_path), views_path)
         kanban = next((view for view in views if isinstance(view, dict) and view.get("view_kind") == "kanban"), None)
         if kanban is None:
             names = ", ".join(sorted(_text(view.get("title")) for view in views if isinstance(view, dict)))
@@ -365,9 +382,9 @@ class VikunjaClient:
         plan_exists = False
         out: list[Card] = []
         for page in range(1, 101):
-            buckets = self._request("GET", f"/projects/{pid}/views/{view_id}/tasks?per_page=100&page={page}")
+            path = f"/projects/{pid}/views/{view_id}/tasks?per_page=100&page={page}"
             fresh = 0
-            for bucket in buckets if isinstance(buckets, list) else []:
+            for bucket in _require_list(self._request("GET", path), path):
                 if not isinstance(bucket, dict):
                     continue
                 title = _text(bucket.get("title"))
@@ -376,7 +393,7 @@ class VikunjaClient:
                 if title != PLAN_COLUMN:
                     continue
                 plan_exists = True
-                for entry in bucket.get("tasks") or []:
+                for entry in _require_list(bucket.get("tasks"), path):
                     if not isinstance(entry, dict):
                         continue
                     cid = _int(entry.get("id"))
