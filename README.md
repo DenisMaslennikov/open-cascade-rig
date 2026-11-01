@@ -28,7 +28,8 @@ repository: the knowledge is the deliverable, and it is versioned like code.
 
 ```
 bin/            the pipeline scripts — every phase is a script, never a manual step
-config/         role parameters, the plan schema, prompt text; no secrets, ever
+config/         the canonical prompts, the plan schema, and *.example.yaml role/model defaults —
+                no secrets, ever. The live settings live in ~/.config/cascade (see config/README.md)
 adr/            architecture decisions in long form (why, alternatives, consequences)
 DECISIONS.md    the index of decisions: number, one-line subject, status, link
 PLAYBOOK.md     the index of operating knowledge

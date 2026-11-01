@@ -9,7 +9,7 @@ Read this first, then only the files the task actually touches. Everything here 
 | Evidence (what a run cost and taught) | `evidence/` | when a claim about cost or model behaviour needs backing |
 | Roadmap and open questions | `PLAN.md` | before picking the next task |
 | Scripts | `bin/` | the only way to run a phase; no manual steps |
-| Configuration | `config/` | role parameters, plan schema, prompts — no secrets here |
+| Configuration | `config/` + `config/README.md` | canonical prompts, plan schema, `*.example.yaml`; the live settings are in `~/.config/cascade`, symlinked back to this directory |
 
 ## Rules that are not negotiable
 

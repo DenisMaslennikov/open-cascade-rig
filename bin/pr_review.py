@@ -268,10 +268,10 @@ def main() -> int:
     env = dict(os.environ)
     env.update({
         "CONFIG__MODEL": f"openai/{model}",
-        # No cap by default: pr-agent then uses the model's own ceiling. Set
-        # CASCADE_REVIEW_MODEL_MAX_TOKENS to a number to bound the reviewer, not to "fix" truncation.
-        **({"CONFIG__CUSTOM_MODEL_MAX_TOKENS": os.environ["CASCADE_REVIEW_MODEL_MAX_TOKENS"]}
-           if os.environ.get("CASCADE_REVIEW_MODEL_MAX_TOKENS") else {}),
+        # pr-agent refuses any model it does not know unless this is set, so it is not an output cap
+        # for our own calls — it is the reviewer's context budget. Override per run when needed.
+        "CONFIG__CUSTOM_MODEL_MAX_TOKENS": os.environ.get(
+            "CASCADE_REVIEW_MODEL_MAX_TOKENS", "32000"),
         "CONFIG__RESPONSE_LANGUAGE": "ru-RU",
         "CONFIG__AI_TIMEOUT": str(args.ai_timeout),
         "CONFIG__MAX_OUTPUT_TOKENS": str(args.max_output),
@@ -329,10 +329,20 @@ def main() -> int:
     if not human_checks:
         llm = {"model": model, "key": key_of(args.project),
                "base_url": "http://litellm.service/v1", "temperature": 0.0, "max_tokens": 900}
-        human_checks, extra_usage = ask_human_checks(llm, text)
+        try:
+            human_checks, extra_usage = ask_human_checks(llm, text)
+        except SystemExit as exc:  # the section is optional; losing the whole review over it is not
+            print(f"note: no human-checks section ({exc}); the review itself stands", file=sys.stderr)
+            human_checks, extra_usage = [], {}
         for key_name, value in extra_usage.items():
             if isinstance(value, int):
                 usage[key_name] = int(usage.get(key_name) or 0) + value
+    # A reviewer that could not review is not an approving reviewer. pr-agent writes a short
+    # "Failed to review PR" and exits 0, which used to read as `approve` on a tiny answer.
+    if re.search(r"failed to review|error reviewing", text, re.I) or "\n" not in text.strip():
+        print(f"ERROR: the reviewer produced no review (see {review_md}): {text.strip()[:300]}",
+              file=sys.stderr)
+        return 1
     verdict = ("block" if re.search(r"🔴|blocker|критич", text, re.I)
                else "comment" if len(text.strip()) > 200 else "approve")
     summary = {

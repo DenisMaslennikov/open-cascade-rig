@@ -33,6 +33,36 @@ your job is what only a reader of the whole branch can see.
 Not findings: preferences the repository rules do not require, future features, or re-litigating a
 decision the owner already recorded in `docs/adr/` or `DECISIONS.md`.
 
+## Weak tests are a finding, not a style question
+
+A test that cannot fail is worse than no test: it buys confidence and pays nothing. Report every
+shape below as `blocker` or `major`, with the path and the line:
+
+- `assert result is not None`, `assert result`, `assert len(x) > 0`, `assert isinstance(...)` —
+  existence instead of value;
+- a test that only asserts "did not raise", or catches a broad exception where a specific error
+  class is the requirement;
+- expected values copied from a run of the implementation (or from its formula) instead of from the
+  authoritative table/reference in the task;
+- asserting `mock.assert_called_once()` where the observable result was available;
+- property-based tests that do not exist where the input space is wide: with `hypothesis`
+  (Python) or `fast-check` (TypeScript) available, a numerical or parsing rule must have at least one
+  property test, and its strategy must not be narrowed to the values the implementation already gets
+  right;
+- a test whose assertion would still pass if the function returned a plausible wrong number (e.g.
+  the value before rounding, the value for the wrong rank).
+
+Strength, in one line: **every acceptance pair must be able to fail.** If you cannot describe the
+wrong answer that this assertion catches, the assertion is decoration.
+
+## Suppressed rules
+
+`# noqa`, `# type: ignore`, `# semgrep: ignore`, `@pytest.mark.skip`, `xfail`, a narrowed exclusion
+list in the CI config, a `--no-verify` in a script: each of them disables a check that exists for a
+reason. An unexplained suppression is a `blocker`; a suppression with a concrete reason is a `minor`.
+Check the diff for them explicitly — this project added rules for local imports and for bare `noqa`
+precisely so that this review is mechanical, not a matter of taste.
+
 ## Output
 
 ```
