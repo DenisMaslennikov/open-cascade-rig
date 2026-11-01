@@ -19,18 +19,20 @@ State:
 
 Exit codes: 0 — committed and green; 1 — failed (gates, scope, timeout, agent error).
 """
+
 from __future__ import annotations
 
 import argparse
 import json
 import os
-import re
 import signal
 import subprocess
 import sys
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
+
+from rig_conf import gateway
 
 BIN = Path(__file__).resolve().parent
 sys.path.insert(0, str(BIN))
@@ -73,11 +75,12 @@ def project_config(slug: str, role: str = "executor") -> dict:
     return {
         "model": model,
         "key": key,
-        "base_url": (project.get("_", {}).get("base_url") or "http://litellm.service/v1").rstrip("/"),
+        "base_url": gateway(project, script="run_subtask.py"),
         "temperature": float(params.get("temperature", 0.1)),
         "max_tokens": token_limit(params.get("max_tokens")),
-        "attempts": int((parse_simple_yaml(CONFIG / "roles.yaml").get("budgets") or {})
-                        .get("attempts_per_subtask", 4) or 4),
+        "attempts": int(
+            (parse_simple_yaml(CONFIG / "roles.yaml").get("budgets") or {}).get("attempts_per_subtask", 4) or 4
+        ),
     }
 
 
@@ -137,12 +140,12 @@ def metrics_of(conversation) -> dict:
     """Best-effort token accounting from the SDK metrics; zeros when the SDK does not expose it."""
     try:
         snapshot = conversation.conversation_stats.get_combined_metrics()
-    except Exception:  # noqa: BLE001 — accounting must never break a run
+    except Exception:
         return {"prompt_tokens": 0, "completion_tokens": 0}
     data = {}
     try:
         data = snapshot.model_dump()
-    except Exception:  # noqa: BLE001
+    except Exception:
         data = {}
     usage = (data.get("accumulated_token_usage") or {}) if isinstance(data, dict) else {}
     return {
@@ -155,35 +158,57 @@ def metrics_of(conversation) -> dict:
 
 def record_usage(slug: str, feature: str, task_id: str, model: str, usage: dict) -> None:
     cmd = [
-        sys.executable, str(BIN / "usage.py"), "record",
-        "-p", slug, "-f", feature or task_id, "-t", task_id, "-r", "executor",
-        "-m", model, "--input", str(usage.get("prompt_tokens") or 0),
-        "--output", str(usage.get("completion_tokens") or 0),
-        "--note", "run_subtask.py",
+        sys.executable,
+        str(BIN / "usage.py"),
+        "record",
+        "-p",
+        slug,
+        "-f",
+        feature or task_id,
+        "-t",
+        task_id,
+        "-r",
+        "executor",
+        "-m",
+        model,
+        "--input",
+        str(usage.get("prompt_tokens") or 0),
+        "--output",
+        str(usage.get("completion_tokens") or 0),
+        "--note",
+        "run_subtask.py",
     ]
     if usage.get("cache_read_tokens"):
         cmd += ["--cache-read", str(usage["cache_read_tokens"])]
     subprocess.run(cmd, capture_output=True, text=True)
 
 
-def run_agent(system: str, prompt: str, worktree: Path, cfg: dict, model: str,
-              log_path: Path, timeout: int, python: str) -> dict:
+def run_agent(
+    system: str, prompt: str, worktree: Path, cfg: dict, model: str, log_path: Path, timeout: int, python: str
+) -> dict:
     """One OpenHands conversation against the worktree; returns metrics or raises."""
     os.environ.setdefault("OPENHANDS_SUPPRESS_BANNER", "1")
-    from openhands.sdk import LLM, Agent, Conversation, Tool  # noqa: E402
-    from openhands.tools.file_editor import FileEditorTool  # noqa: E402
-    from openhands.tools.terminal import TerminalTool  # noqa: E402
+    from openhands.sdk import LLM, Agent, Conversation, Tool
+    from openhands.tools.file_editor import FileEditorTool
+    from openhands.tools.terminal import TerminalTool
 
     llm_model = model if model.startswith("openai/") else f"openai/{model}"
-    llm = LLM(model=llm_model, base_url=cfg["base_url"], api_key=cfg["key"],
-              usage_id="cascade-executor", temperature=cfg["temperature"],
-              max_output_tokens=cfg["max_tokens"])
-    agent = Agent(llm=llm, tools=[Tool(name=TerminalTool.name), Tool(name=FileEditorTool.name)],
-                  system_prompt_kwargs={"cli_mode": True})
-    conversation = Conversation(agent=agent, workspace=str(worktree),
-                                max_iteration_per_run=80, max_budget_per_run=2.0)
+    llm = LLM(
+        model=llm_model,
+        base_url=cfg["base_url"],
+        api_key=cfg["key"],
+        usage_id="cascade-executor",
+        temperature=cfg["temperature"],
+        max_output_tokens=cfg["max_tokens"],
+    )
+    agent = Agent(
+        llm=llm,
+        tools=[Tool(name=TerminalTool.name), Tool(name=FileEditorTool.name)],
+        system_prompt_kwargs={"cli_mode": True},
+    )
+    conversation = Conversation(agent=agent, workspace=str(worktree), max_iteration_per_run=80, max_budget_per_run=2.0)
 
-    def on_timeout(signum, frame):  # noqa: ARG001
+    def on_timeout(signum, frame):
         raise TimeoutError(f"executor did not finish in {timeout}s")
 
     previous = signal.signal(signal.SIGALRM, on_timeout)
@@ -212,8 +237,7 @@ def status(slug: str) -> int:
     root = STATE / slug / "runs" / "executor"
     now = time.time()
     rows = []
-    for record_path in sorted(root.glob("*/*/record.json"), key=lambda p: p.stat().st_mtime,
-                              reverse=True)[:10]:
+    for record_path in sorted(root.glob("*/*/record.json"), key=lambda p: p.stat().st_mtime, reverse=True)[:10]:
         data = json.loads(record_path.read_text(encoding="utf-8"))
         log_path = record_path.parent / "log.txt"
         age_log = int(now - log_path.stat().st_mtime) if log_path.exists() else None
@@ -225,9 +249,16 @@ def status(slug: str) -> int:
                 alive = True
             except OSError:
                 alive = False
-        rows.append({"subtask": data.get("subtask"), "state": data.get("state"),
-                     "alive": alive, "started": data.get("started"),
-                     "last_log_seconds_ago": age_log, "run_dir": str(record_path.parent)})
+        rows.append(
+            {
+                "subtask": data.get("subtask"),
+                "state": data.get("state"),
+                "alive": alive,
+                "started": data.get("started"),
+                "last_log_seconds_ago": age_log,
+                "run_dir": str(record_path.parent),
+            }
+        )
     print(json.dumps({"runs": rows}, ensure_ascii=False, indent=1))
     return 0
 
@@ -242,8 +273,7 @@ def main() -> int:
     ap.add_argument("--subtask")
     ap.add_argument("--worktree")
     ap.add_argument("--model", help="override the executor model")
-    ap.add_argument("--python", default=str(Path.home() / "projects" / "occc" / "backend" /
-                                             ".venv" / "bin" / "python"))
+    ap.add_argument("--python", default=str(Path.home() / "projects" / "occc" / "backend" / ".venv" / "bin" / "python"))
     ap.add_argument("--attempts", type=int, default=0, help="override budgets.attempts_per_subtask")
     ap.add_argument("--timeout", type=int, default=1500, help="wall clock per attempt, seconds")
     ap.add_argument("--feature", default="")
@@ -276,18 +306,30 @@ def main() -> int:
         raise SystemExit(f"ERROR: worktree is not clean:\n{dirty[:500]}")
     feedback_seed = ""
     if args.feedback:
-        feedback_seed = ("REVIEW FINDINGS TO FIX (tests stay frozen; change only files in scope):\n"
-                         + args.feedback.strip() + "\n")
+        feedback_seed = (
+            "REVIEW FINDINGS TO FIX (tests stay frozen; change only files in scope):\n" + args.feedback.strip() + "\n"
+        )
 
-    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
     run_dir = STATE / args.project / "runs" / "executor" / args.subtask / stamp
     run_dir.mkdir(parents=True, exist_ok=True)
     log_path = run_dir / "log.txt"
     record_path = run_dir / "record.json"
-    record_path.write_text(json.dumps({
-        "subtask": args.subtask, "state": "starting", "pid": os.getpid(),
-        "started": stamp, "base": base, "model": model,
-    }, ensure_ascii=False, indent=1), encoding="utf-8")
+    record_path.write_text(
+        json.dumps(
+            {
+                "subtask": args.subtask,
+                "state": "starting",
+                "pid": os.getpid(),
+                "started": stamp,
+                "base": base,
+                "model": model,
+            },
+            ensure_ascii=False,
+            indent=1,
+        ),
+        encoding="utf-8",
+    )
 
     feedback = feedback_seed
     attempt_rows = []
@@ -297,17 +339,27 @@ def main() -> int:
     for number in range(1, attempts + 1):
         prompt = prompt_for(subtask, task, worktree, args.python, feedback)
         (run_dir / f"prompt-{number}.md").write_text(prompt, encoding="utf-8")
-        record_path.write_text(json.dumps({
-            "subtask": args.subtask, "state": f"attempt {number}/{attempts}", "pid": os.getpid(),
-            "started": stamp, "base": base, "model": model,
-        }, ensure_ascii=False, indent=1), encoding="utf-8")
+        record_path.write_text(
+            json.dumps(
+                {
+                    "subtask": args.subtask,
+                    "state": f"attempt {number}/{attempts}",
+                    "pid": os.getpid(),
+                    "started": stamp,
+                    "base": base,
+                    "model": model,
+                },
+                ensure_ascii=False,
+                indent=1,
+            ),
+            encoding="utf-8",
+        )
         try:
-            metrics = run_agent(SYSTEM_PROMPT, prompt, worktree, cfg, model, log_path,
-                                args.timeout, args.python)
+            metrics = run_agent(SYSTEM_PROMPT, prompt, worktree, cfg, model, log_path, args.timeout, args.python)
         except TimeoutError as exc:
             attempt_rows.append({"attempt": number, "error": str(exc)})
             break
-        except Exception as exc:  # noqa: BLE001 — a crashed agent must leave a record
+        except Exception as exc:
             attempt_rows.append({"attempt": number, "error": f"{type(exc).__name__}: {exc}"})
             break
         for key in total_usage:
@@ -315,51 +367,78 @@ def main() -> int:
 
         scope = gate("check-diff", repo=str(worktree), allowed=",".join(allowed))
         frozen = gate("frozen-tests", repo=str(worktree), base=base, tests_prefix="backend/tests/")
-        rel_tests = [p.split("backend/", 1)[-1] if p.startswith("backend/") else p
-                     for p in (task.get("tests") or [])]
+        rel_tests = [p.split("backend/", 1)[-1] if p.startswith("backend/") else p for p in (task.get("tests") or [])]
         cmd = f"{args.python} -m pytest {' '.join(rel_tests)} -q"
         passing = gate("expect-pass", repo=str(worktree / "backend"), cmd=cmd)
-        attempt_rows.append({"attempt": number, "usage": metrics, "check_diff": scope["ok"],
-                             "frozen_tests": frozen["ok"], "expect_pass": passing["ok"]})
+        attempt_rows.append(
+            {
+                "attempt": number,
+                "usage": metrics,
+                "check_diff": scope["ok"],
+                "frozen_tests": frozen["ok"],
+                "expect_pass": passing["ok"],
+            }
+        )
         if scope.get("ok") and frozen.get("ok") and passing.get("ok"):
             green = True
             break
-        feedback = "\n".join(filter(None, [
-            "" if scope.get("ok") else f"files outside files_allowed: {scope.get('violations')}",
-            "" if frozen.get("ok") else f"tests were modified: {frozen.get('violations')}",
-            "" if passing.get("ok") else f"tests still failing:\n{passing.get('tail', '')}",
-        ]))
+        feedback = "\n".join(
+            filter(
+                None,
+                [
+                    "" if scope.get("ok") else f"files outside files_allowed: {scope.get('violations')}",
+                    "" if frozen.get("ok") else f"tests were modified: {frozen.get('violations')}",
+                    "" if passing.get("ok") else f"tests still failing:\n{passing.get('tail', '')}",
+                ],
+            )
+        )
         if not scope.get("ok"):
             break
 
     usage = {**total_usage, "attempts": len(attempt_rows)}
     result = {
-        "ok": False, "subtask": args.subtask, "model": model, "commit": None,
-        "attempts": attempt_rows, "usage": usage, "run_dir": str(run_dir),
+        "ok": False,
+        "subtask": args.subtask,
+        "model": model,
+        "commit": None,
+        "attempts": attempt_rows,
+        "usage": usage,
+        "run_dir": str(run_dir),
     }
 
     if green:
         git(worktree, "add", "-A")
         prefix = "fix" if args.feedback else "feat"
         message = f"{prefix}: {subtask.get('title') or args.subtask}\n\n{subtask.get('goal') or ''}".strip()
-        commit = git(worktree, "-c", "user.name=cascade-executor",
-                     "-c", "user.email=cascade@localhost", "commit", "-m", message)
+        commit = git(
+            worktree, "-c", "user.name=cascade-executor", "-c", "user.email=cascade@localhost", "commit", "-m", message
+        )
         if commit.returncode == 0:
             result["commit"] = git(worktree, "rev-parse", "HEAD").stdout.strip()
             result["ok"] = True
         else:
             result["error"] = commit.stderr.strip()[:400]
 
-    full = gate("expect-pass", repo=str(worktree / "backend"),
-                cmd=f"{args.python} -m pytest -q")
+    full = gate("expect-pass", repo=str(worktree / "backend"), cmd=f"{args.python} -m pytest -q")
     result["full_suite"] = {"ok": full.get("ok"), "tail": full.get("tail")}
     record_usage(args.project, args.feature or args.subtask, args.subtask, model, total_usage)
 
-    record_path.write_text(json.dumps({
-        "subtask": args.subtask, "state": "done" if result["ok"] else "failed",
-        "pid": os.getpid(), "started": stamp, "base": base, "model": model,
-        "result": result,
-    }, ensure_ascii=False, indent=1), encoding="utf-8")
+    record_path.write_text(
+        json.dumps(
+            {
+                "subtask": args.subtask,
+                "state": "done" if result["ok"] else "failed",
+                "pid": os.getpid(),
+                "started": stamp,
+                "base": base,
+                "model": model,
+                "result": result,
+            },
+            ensure_ascii=False,
+            indent=1,
+        ),
+        encoding="utf-8",
+    )
     print(json.dumps(result, ensure_ascii=False, indent=1))
     return 0 if result["ok"] else 1
 

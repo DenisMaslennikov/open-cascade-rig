@@ -1,0 +1,8 @@
+#!/bin/sh
+# Delegates to the machine-wide pre-push hook.
+#
+# Why a shim instead of nothing: this repository sets core.hooksPath to .githooks so the pre-commit
+# hook is versioned. That setting replaces the global hooks directory, and the global one holds the
+# force-push ban (non-fast-forward, branch deletion, push to main). Without this shim, switching the
+# path would silently disable that protection.
+exec "$HOME/.config/git/hooks/pre-push" "$@"

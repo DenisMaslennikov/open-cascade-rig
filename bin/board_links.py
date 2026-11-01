@@ -12,6 +12,7 @@ links.json:
 
 Output (stdout, one JSON object): {"created": n, "skipped": n, "errors": [...]}
 """
+
 from __future__ import annotations
 
 import argparse
@@ -21,7 +22,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path.home() / "soft" / "vikunja"))
 
-from board import Board  # noqa: E402
+from board import Board
 
 STATE = Path.home() / ".local/state/cascade"
 
@@ -42,8 +43,7 @@ def main() -> int:
     def have(task_id: int) -> set[tuple[str, int]]:
         if task_id not in existing:
             rels = board.relations(task_id)
-            existing[task_id] = {(kind, item["id"])
-                                 for kind, items in rels.items() for item in items or []}
+            existing[task_id] = {(kind, item["id"]) for kind, items in rels.items() for item in items or []}
         return existing[task_id]
 
     created = skipped = 0
@@ -60,10 +60,9 @@ def main() -> int:
             board.relate(source, target, kind)
             have(source).add((kind, target))
             created += 1
-        except Exception as exc:  # noqa: BLE001 — the report carries the reason
+        except Exception as exc:
             errors.append(f"{source} -{kind}-> {target}: {exc}")
-    print(json.dumps({"created": created, "skipped": skipped, "errors": errors},
-                     ensure_ascii=False, indent=1))
+    print(json.dumps({"created": created, "skipped": skipped, "errors": errors}, ensure_ascii=False, indent=1))
     return 1 if errors else 0
 
 

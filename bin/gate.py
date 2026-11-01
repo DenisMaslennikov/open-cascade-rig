@@ -15,13 +15,13 @@
 
 Все команды печатают JSON в stdout и возвращают 0 (гейт пройден) или 1 (нет).
 """
+
 from __future__ import annotations
 
 import argparse
 import json
 import re
 import subprocess
-import sys
 
 
 def run(cmd: str, cwd: str, timeout: int) -> tuple[int, str]:
@@ -49,7 +49,7 @@ def changed_files(repo: str, base: str | None) -> list[str]:
         if not line.strip():
             continue
         path = line[3:].strip()
-        if " -> " in path:            # rename
+        if " -> " in path:  # rename
             path = path.split(" -> ")[-1]
         files.append(path)
     return files
@@ -77,14 +77,12 @@ def main() -> int:
         allowed = [x.strip() for x in a.allowed.split(",") if x.strip()]
         files = changed_files(a.repo, a.base)
         bad = [f for f in files if not any(f == x or f.startswith(x.rstrip("/") + "/") for x in allowed)]
-        return verdict(not bad, {"gate": "check-diff", "changed": files,
-                                 "allowed": allowed, "violations": bad})
+        return verdict(not bad, {"gate": "check-diff", "changed": files, "allowed": allowed, "violations": bad})
 
     if a.command == "frozen-tests":
         files = changed_files(a.repo, a.base)
         bad = [f for f in files if f.startswith(a.tests_prefix)]
-        return verdict(not bad, {"gate": "frozen-tests", "changed": files,
-                                 "prefix": a.tests_prefix, "violations": bad})
+        return verdict(not bad, {"gate": "frozen-tests", "changed": files, "prefix": a.tests_prefix, "violations": bad})
 
     if not a.cmd:
         raise SystemExit("--cmd обязателен для expect-*")
@@ -97,11 +95,19 @@ def main() -> int:
         marker = a.marker or r"(?i)(assert|failed|failure|error|traceback)"
         matched = re.search(marker, out) is not None
         ok = code != 0 and matched and not infra
-        return verdict(ok, {"gate": "expect-fail", "exit_code": code, "matched_marker": matched,
-                            "infrastructure_error": infra, "tail": tail})
-    return verdict(code == 0 and not infra,
-                   {"gate": "expect-pass", "exit_code": code,
-                    "infrastructure_error": infra, "tail": tail})
+        return verdict(
+            ok,
+            {
+                "gate": "expect-fail",
+                "exit_code": code,
+                "matched_marker": matched,
+                "infrastructure_error": infra,
+                "tail": tail,
+            },
+        )
+    return verdict(
+        code == 0 and not infra, {"gate": "expect-pass", "exit_code": code, "infrastructure_error": infra, "tail": tail}
+    )
 
 
 if __name__ == "__main__":

@@ -26,6 +26,7 @@ Exit codes:
   0 — an answer was produced (a valid plan, or the questions that unblock one)
   1 — the run failed (bad input, gateway error, unparseable answer, invalid plan)
 """
+
 from __future__ import annotations
 
 import argparse
@@ -36,18 +37,35 @@ import subprocess
 import sys
 import urllib.error
 import urllib.request
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
+
+from rig_conf import gateway
 
 CONFIG = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "cascade"
 STATE = Path(os.environ.get("XDG_STATE_HOME", Path.home() / ".local" / "state")) / "cascade"
-GATEWAY = "http://litellm.service/v1"
 BIN = Path(__file__).resolve().parent
 
 SKIP_DIRS = {
-    ".git", ".venv", "venv", "node_modules", "__pycache__", "dist", "build", "coverage",
-    ".pytest_cache", ".ruff_cache", ".mypy_cache", "data", ".idea", ".vscode",
-    "playwright-report", "test-results", ".npm", ".cache", "site-packages",
+    ".git",
+    ".venv",
+    "venv",
+    "node_modules",
+    "__pycache__",
+    "dist",
+    "build",
+    "coverage",
+    ".pytest_cache",
+    ".ruff_cache",
+    ".mypy_cache",
+    "data",
+    ".idea",
+    ".vscode",
+    "playwright-report",
+    "test-results",
+    ".npm",
+    ".cache",
+    "site-packages",
 }
 SKIP_SUFFIXES = {".pyc", ".pyo", ".lock", ".zip", ".png", ".jpg", ".jpeg", ".svg", ".ico", ".woff", ".woff2"}
 MAX_MAP_ENTRIES = 500
@@ -145,7 +163,7 @@ def project_config(slug: str) -> dict:
         raise SystemExit(f"ERROR: {key_ref} is missing from {CONFIG / 'keys.env'}")
 
     params = (roles.get("roles") or {}).get("architect", {})
-    base_url = project.get("_", {}).get("base_url") or GATEWAY
+    base_url = gateway(project, script="plan_task")
     return {
         "model": model,
         "key": key,
@@ -233,7 +251,8 @@ HOUSE RULES (from the project owner, binding for every role):
   name is not enough."""
 
 
-SYSTEM_PROMPT = """You are the architect of an automated development pipeline.
+SYSTEM_PROMPT = (
+    """You are the architect of an automated development pipeline.
 
 Your job: turn a customer request into a plan of small, independently implementable
 subtasks, or — when the request cannot be planned yet — into the questions that unblock it.
@@ -272,7 +291,9 @@ new path in `files_allowed` — that is expected, not an error.
 Ask questions instead of guessing when: a product decision is open (who sees what, what
 counts as done), a term is ambiguous, a required external credential or permission is
 unstated, or two requirements contradict each other. At most 5 questions, each answerable in
-one sentence. Do not ask about things the repository already answers.""" + HOUSE_RULES
+one sentence. Do not ask about things the repository already answers."""
+    + HOUSE_RULES
+)
 
 
 def build_user_message(request: str, repo_doc: str, schema_text: str) -> str:
@@ -320,8 +341,7 @@ def call_model(cfg: dict, system: str, user: str) -> tuple[str, dict]:
     return content, data.get("usage") or {}
 
 
-def call_model_stream(cfg: dict, system: str, user: str,
-                      idle_timeout: int = 300) -> tuple[str, dict]:
+def call_model_stream(cfg: dict, system: str, user: str, idle_timeout: int = 300) -> tuple[str, dict]:
     """Same call, but streamed: a long generation cannot die on a single blocking read.
 
     The gateway answers with server-sent events; usage arrives in the last chunk when
@@ -342,8 +362,11 @@ def call_model_stream(cfg: dict, system: str, user: str,
     req = urllib.request.Request(
         cfg["base_url"] + "/chat/completions",
         data=json.dumps(body).encode(),
-        headers={"Authorization": "Bearer " + cfg["key"], "Content-Type": "application/json",
-                 "Accept": "text/event-stream"},
+        headers={
+            "Authorization": "Bearer " + cfg["key"],
+            "Content-Type": "application/json",
+            "Accept": "text/event-stream",
+        },
     )
     chunks: list[str] = []
     usage: dict = {}
@@ -374,8 +397,7 @@ def call_model_stream(cfg: dict, system: str, user: str,
     except urllib.error.URLError as exc:
         raise SystemExit(f"ERROR: gateway unreachable: {exc.reason}") from exc
     except TimeoutError as exc:
-        raise SystemExit("ERROR: stream stalled; no chunk for "
-                         f"{idle_timeout}s") from exc
+        raise SystemExit(f"ERROR: stream stalled; no chunk for {idle_timeout}s") from exc
 
     content = "".join(chunks)
     if not content.strip():
@@ -394,7 +416,8 @@ def extract_json(text: str) -> dict:
         raise SystemExit(
             "ERROR: модель вернула пустой content. У reasoning-моделей весь бюджет выхода ушёл "
             "в reasoning_tokens — поднимать max_tokens роли или брать не-reasoning модель; "
-            "ключ и шлюз тут ни при чём.")
+            "ключ и шлюз тут ни при чём."
+        )
     cleaned = re.sub(r"^```(?:json)?|```$", "", text.strip(), flags=re.MULTILINE).strip()
     start = cleaned.find("{")
     if start < 0:
@@ -433,10 +456,7 @@ def validate_plan(plan: dict, repo: Path) -> tuple[bool, list[str]]:
         text=True,
     )
     notes = [ln for ln in (proc.stderr or "").splitlines() if ln.startswith("note:")]
-    errors = [
-        ln for ln in (proc.stderr or "").splitlines()
-        if ln.strip() and not ln.startswith("note:")
-    ]
+    errors = [ln for ln in (proc.stderr or "").splitlines() if ln.strip() and not ln.startswith("note:")]
     for note in notes:
         print(note, file=sys.stderr)
     return proc.returncode == 0, errors
@@ -448,10 +468,25 @@ def record_usage(slug: str, model: str, usage: dict, task_id: str) -> None:
     completion_tokens = int(usage.get("completion_tokens") or 0)
     cached = int((usage.get("prompt_tokens_details") or {}).get("cached_tokens") or 0)
     cmd = [
-        sys.executable, str(BIN / "usage.py"), "record",
-        "-p", slug, "-f", "_planning", "-t", task_id, "-r", "architect",
-        "-m", model, "--input", str(prompt_tokens), "--output", str(completion_tokens),
-        "--note", "plan_task.py",
+        sys.executable,
+        str(BIN / "usage.py"),
+        "record",
+        "-p",
+        slug,
+        "-f",
+        "_planning",
+        "-t",
+        task_id,
+        "-r",
+        "architect",
+        "-m",
+        model,
+        "--input",
+        str(prompt_tokens),
+        "--output",
+        str(completion_tokens),
+        "--note",
+        "plan_task.py",
     ]
     if cached:
         cmd += ["--cache-read", str(cached)]
@@ -501,10 +536,13 @@ def main() -> int:
     if usage.get("_finish_reason") == "length":
         raw_dir = STATE / args.project / "plans" / "raw"
         raw_dir.mkdir(parents=True, exist_ok=True)
-        raw_path = raw_dir / f"{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}.txt"
+        raw_path = raw_dir / f"{datetime.now(UTC).strftime('%Y%m%dT%H%M%SZ')}.txt"
         raw_path.write_text(content, encoding="utf-8")
-        print(f"ERROR: ответ обрезан по max_tokens (finish_reason=length); сырой ответ {raw_path}. "
-              f"Поднять max_tokens роли architect или сузить запрос.", file=sys.stderr)
+        print(
+            f"ERROR: ответ обрезан по max_tokens (finish_reason=length); сырой ответ {raw_path}. "
+            f"Поднять max_tokens роли architect или сузить запрос.",
+            file=sys.stderr,
+        )
         return 1
     answer = extract_json(content)
 
@@ -548,7 +586,7 @@ def main() -> int:
 
     state_dir = STATE / args.project
     (state_dir / "plans").mkdir(parents=True, exist_ok=True)
-    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
     payload = json.dumps(result, ensure_ascii=False, indent=1)
     (state_dir / "plans" / f"{stamp}.json").write_text(payload + "\n", encoding="utf-8")
     (state_dir / "plan.json").write_text(payload + "\n", encoding="utf-8")

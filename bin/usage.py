@@ -25,6 +25,7 @@
   usage.py report -p eve
   usage.py report -p eve --feature industry --json
 """
+
 from __future__ import annotations
 
 import argparse
@@ -33,13 +34,14 @@ import os
 import sys
 import urllib.request
 from collections import defaultdict
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
+
+from rig_conf import gateway, project_config
 
 STATE = Path(os.environ.get("XDG_STATE_HOME", Path.home() / ".local/state")) / "cascade"
 CONFIG = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "cascade"
 PRICES = CONFIG / "pricing.json"
-GATEWAY = "http://litellm.service/v1"
 
 
 # ---------------------------------------------------------------- helpers
@@ -59,11 +61,12 @@ def load_keys() -> dict[str, str]:
     return out
 
 
-def load_prices(refresh: bool = False) -> dict[str, dict[str, float]]:
+def load_prices(refresh: bool = False, project: str | None = None) -> dict[str, dict[str, float]]:
     if refresh or not PRICES.exists():
         keys = load_keys()
         key = keys.get("LITELLM_KEY") or next(iter(keys.values()), "")
-        req = urllib.request.Request(GATEWAY + "/model/info")
+        base = gateway(project_config(project) if project else {}, script="usage price")
+        req = urllib.request.Request(base + "/model/info")
         req.add_header("Authorization", "Bearer " + key)
         with urllib.request.urlopen(req, timeout=30) as r:
             data = json.load(r)["data"]
@@ -101,10 +104,10 @@ def read_events(project: str) -> list[dict]:
 
 # ---------------------------------------------------------------- commands
 def cmd_record(a: argparse.Namespace) -> int:
-    prices = {} if a.cost is not None else load_prices()
+    prices = {} if a.cost is not None else load_prices(project=a.project)
     cost = a.cost if a.cost is not None else cost_of(a.model, a.input, a.output, prices)
     event = {
-        "ts": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "ts": datetime.now(UTC).isoformat(timespec="seconds"),
         "project": a.project,
         "feature": a.feature or "_none",
         "task": a.task or "_none",
@@ -137,8 +140,7 @@ def aggregate(events: list[dict], key: str | None) -> dict:
 
 
 def fmt(block: dict) -> str:
-    return (f"{block['calls']:>3} вызовов  in {block['in']:>9}  out {block['out']:>7}  "
-            f"= {block['cost']:>10.4f}")
+    return f"{block['calls']:>3} вызовов  in {block['in']:>9}  out {block['out']:>7}  = {block['cost']:>10.4f}"
 
 
 def cmd_report(a: argparse.Namespace) -> int:
@@ -152,9 +154,11 @@ def cmd_report(a: argparse.Namespace) -> int:
     grand = {"calls": 0, "in": 0, "out": 0, "cost": 0.0}
     data = {}
     for proj in projects:
-        events = [e for e in read_events(proj)
-                  if (not a.feature or e.get("feature") == a.feature)
-                  and (not a.task or e.get("task") == a.task)]
+        events = [
+            e
+            for e in read_events(proj)
+            if (not a.feature or e.get("feature") == a.feature) and (not a.task or e.get("task") == a.task)
+        ]
         if not events:
             continue
         data[proj] = {
@@ -174,8 +178,7 @@ def cmd_report(a: argparse.Namespace) -> int:
     print(f"ИТОГО по {', '.join(data)}: {fmt(grand)}")
     for proj, d in data.items():
         print(f"\n■ {proj}: {fmt(d['total'])}")
-        for title, key in (("фичи", "by_feature"), ("задачи", "by_task"),
-                           ("модели", "by_model"), ("роли", "by_role")):
+        for title, key in (("фичи", "by_feature"), ("задачи", "by_task"), ("модели", "by_model"), ("роли", "by_role")):
             print(f"  {title}:")
             for name, block in d[key].items():
                 print(f"    {name:<28} {fmt(block)}")
@@ -183,7 +186,7 @@ def cmd_report(a: argparse.Namespace) -> int:
 
 
 def cmd_price(a: argparse.Namespace) -> int:
-    prices = load_prices(refresh=a.refresh)
+    prices = load_prices(refresh=a.refresh, project=a.project)
     print(f"цен в кэше: {len(prices)} → {PRICES}")
     for model in list(prices)[:5]:
         p = prices[model]
@@ -229,6 +232,7 @@ def main() -> int:
 
     pr = sp.add_parser("price")
     pr.add_argument("--refresh", action="store_true")
+    pr.add_argument("-p", "--project", help="project whose config gives the gateway and key")
     pr.set_defaults(func=cmd_price)
 
     pl = sp.add_parser("projects")

@@ -1,0 +1,50 @@
+[tool.ruff]
+# The same width the OCCC project writes; `ruff format` is the only formatter here too.
+line-length = 120
+target-version = "py312"
+
+[tool.ruff.lint]
+# Same families as the product repository, so a rule learned in one place holds in both.
+# Kept: E4/E7/E9 (pycodestyle without the layout the formatter owns), F (undefined names, unused
+#   imports, f-string bugs), I (import order, which makes a forbidden local import visible), UP,
+#   B (mutable defaults, accident-prone control flow), S (bandit findings), RUF (ruff's own).
+# Dropped: E1/E2/E3/E5/E6 and W (layout belongs to the formatter), E501 (the formatter owns width),
+#   D (docstring style — this project has its own convention), PL, SIM, C4, DTZ, T10, PTH, EM, RET,
+#   ARG (opinions and churn without a defect signal).
+select = ["E4", "E7", "E9", "F", "I", "UP", "B", "S", "RUF"]
+ignore = ["S101"]  # asserts are the point of a test
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S105", "S106"]
+"bin/pr_review.py" = ["S310"]  # the review engine is an authenticated HTTP client
+# Debt, recorded rather than hidden. These scripts were written before the gate existed; the rules
+# above are the standard, and the ignores below are the exact places that do not meet it yet. Each
+# line names the class of finding it suppresses, so removing one is a measurable task.
+"bin/**" = [
+  "S603",  # subprocess with an argument list: the calls are ours (git, curl), not user input
+  "S607",  # partial paths (git, curl, gh): resolved through PATH by design, see rig_conf
+  "S602",  # shell=True in the two wrapper calls that take a whole command string from a card
+  "S606",  # starting a process without a shell: same wrapper calls
+  "RUF001", "RUF002", "RUF003",  # Cyrillic in existing docstrings and help texts (the rules say English)
+  "S310",  # urllib to the model gateway: the URL comes from project config, not from user input
+  "RUF005",  # list concatenation in the two traversal helpers, rewritten by the debt card
+  "E741",  # a one-letter `l` in two list comprehensions, renamed by the debt card
+  "F841",  # an unused `by_id` in validate_plan — dead code, removed by the debt card
+  "B007",  # an unused loop counter in the review loop, kept for its log line, cleaned by the card
+]
+# A real defect found by this gate, not fixed here: the fix belongs to a card that the cascade runs
+# (AGENTS.md rule 10). Delete this line in the pull request that fixes `brief`.
+"bin/schema_design.py" = ["F821", "B007", "E741"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["bin"]
+addopts = "-q"
+# Property-based tests default to many more examples than a unit test needs; the cap keeps CI honest.
+markers = ["property: hypothesis-driven, seconds per test"]
+
+[tool.mutmut]
+# Mutation runs only over the module a pull request touched, and only through the Makefile target:
+# a whole-repository run is minutes of CPU for a signal nobody reads.
+paths_to_mutate = "bin/"
+tests_dir = "tests/"

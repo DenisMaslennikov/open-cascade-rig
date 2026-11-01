@@ -25,6 +25,7 @@ State:
 
 Exit codes: 0 — an answer was produced, 1 — failure.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -32,27 +33,30 @@ import json
 import os
 import subprocess
 import sys
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
+
+from rig_conf import gateway
 
 BIN = Path(__file__).resolve().parent
 sys.path.insert(0, str(BIN))
 
 from plan_task import (  # noqa: E402
-    HOUSE_RULES,
     CONFIG,
+    HOUSE_RULES,
     STATE,
     call_model_stream,
-    token_limit,
     load_keys,
     parse_simple_yaml,
     repo_map,
+    token_limit,
 )
 
 MAX_FILE_CHARS = 20000
 MAX_REQUEST_CHARS = 20000
 
-SYSTEM_PROMPT = """You are the chief architect of this project. The owner asks you a question; you
+SYSTEM_PROMPT = (
+    """You are the chief architect of this project. The owner asks you a question; you
 answer it as the person responsible for the shape of the system, not as a task decomposer.
 
 What a good answer contains:
@@ -72,7 +76,9 @@ Rules:
 - Do not write code unless the owner asks for code. Pseudocode or a signature is fine when it
   removes ambiguity.
 - Keep it as long as the question deserves and not longer. No preamble, no summary of the question.
-- Write in RUSSIAN; identifiers, paths, table names, scopes and technology names stay in English.""" + HOUSE_RULES
+- Write in RUSSIAN; identifiers, paths, table names, scopes and technology names stay in English."""
+    + HOUSE_RULES
+)
 
 
 def role_config(slug: str) -> dict:
@@ -90,7 +96,7 @@ def role_config(slug: str) -> dict:
     return {
         "model": model,
         "key": key,
-        "base_url": (project.get("_", {}).get("base_url") or "http://litellm.service/v1").rstrip("/"),
+        "base_url": gateway(project, script="chief_architect.py"),
         "temperature": float(params.get("temperature", 0.2)),
         "max_tokens": token_limit(params.get("max_tokens")),
     }
@@ -105,21 +111,32 @@ def schema_digest(slug: str) -> str:
     for convention in schema.get("conventions") or []:
         lines.append(f"- {convention}")
     for agg in schema.get("aggregates") or []:
-        lines += ["", f"## aggregate {agg.get('id')} — {agg.get('title')} "
-                      f"({agg.get('lifetime')}), owner {agg.get('owner_module')}"]
+        lines += [
+            "",
+            f"## aggregate {agg.get('id')} — {agg.get('title')} "
+            f"({agg.get('lifetime')}), owner {agg.get('owner_module')}",
+        ]
         for table in agg.get("tables") or []:
             cols = ", ".join(
-                f"{c['name']} {c['type']}" + (" pk" if c.get("pk") else "")
+                f"{c['name']} {c['type']}"
+                + (" pk" if c.get("pk") else "")
                 + (" null" if c.get("nullable") else "")
-                + (f" -> {c['references']['table']}.{c['references']['column']}"
-                   if (c.get("references") or {}).get("table") else "")
+                + (
+                    f" -> {c['references']['table']}.{c['references']['column']}"
+                    if (c.get("references") or {}).get("table")
+                    else ""
+                )
                 for c in table.get("columns") or []
             )
             lines.append(f"  {table['name']}: {cols}")
             if table.get("indexes"):
-                lines.append("    indexes: " + "; ".join(
-                    f"({', '.join(i.get('columns') or [])})"
-                    + (" unique" if i.get("unique") else "") for i in table["indexes"]))
+                lines.append(
+                    "    indexes: "
+                    + "; ".join(
+                        f"({', '.join(i.get('columns') or [])})" + (" unique" if i.get("unique") else "")
+                        for i in table["indexes"]
+                    )
+                )
             if table.get("constraints"):
                 lines.append("    constraints: " + "; ".join(table["constraints"]))
             if table.get("growth"):
@@ -134,8 +151,10 @@ def roadmap_digest(slug: str) -> str:
     roadmap = json.loads(path.read_text(encoding="utf-8")).get("roadmap") or {}
     lines = ["PRODUCT ROADMAP", "", str(roadmap.get("product_summary", "")).strip(), ""]
     for stage in roadmap.get("stages") or []:
-        lines.append(f"## {stage.get('id')} — {stage.get('title')} (complexity "
-                     f"{stage.get('complexity')}): {stage.get('intent', '')}")
+        lines.append(
+            f"## {stage.get('id')} — {stage.get('title')} (complexity "
+            f"{stage.get('complexity')}): {stage.get('intent', '')}"
+        )
         for task in stage.get("tasks") or []:
             goal = " ".join(str(task.get("goal", "")).split())[:300]
             lines.append(f"  - {task.get('id')} [{task.get('size')}] {task.get('title')}: {goal}")
@@ -181,12 +200,25 @@ def build_context(keys: list[str], repo: Path, slug: str) -> tuple[str, dict]:
 
 def record(cfg: dict, slug: str, usage: dict) -> None:
     cmd = [
-        sys.executable, str(BIN / "usage.py"), "record",
-        "-p", slug, "-f", "_advice", "-t", "_chief_architect", "-r", "chief_architect",
-        "-m", cfg["model"],
-        "--input", str(int(usage.get("prompt_tokens") or 0)),
-        "--output", str(int(usage.get("completion_tokens") or 0)),
-        "--note", "chief_architect.py",
+        sys.executable,
+        str(BIN / "usage.py"),
+        "record",
+        "-p",
+        slug,
+        "-f",
+        "_advice",
+        "-t",
+        "_chief_architect",
+        "-r",
+        "chief_architect",
+        "-m",
+        cfg["model"],
+        "--input",
+        str(int(usage.get("prompt_tokens") or 0)),
+        "--output",
+        str(int(usage.get("completion_tokens") or 0)),
+        "--note",
+        "chief_architect.py",
     ]
     cached = int((usage.get("prompt_tokens_details") or {}).get("cached_tokens") or 0)
     if cached:
@@ -198,8 +230,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Ask the chief architect a question.")
     parser.add_argument("--project", required=True)
     parser.add_argument("--request", required=True, help="text or @path")
-    parser.add_argument("--context", default="repo",
-                        help="comma-separated: repo, schema, roadmap, file:PATH")
+    parser.add_argument("--context", default="repo", help="comma-separated: repo, schema, roadmap, file:PATH")
     parser.add_argument("--repo", help="repository path; defaults to ~/projects/<slug>")
     parser.add_argument("--out", help="also write the answer here")
     args = parser.parse_args()
@@ -224,7 +255,7 @@ def main() -> int:
         return 1
 
     record(cfg, args.project, usage)
-    stamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    stamp = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
     state_dir = STATE / args.project / "advice"
     state_dir.mkdir(parents=True, exist_ok=True)
     payload = {
@@ -233,16 +264,18 @@ def main() -> int:
         "model": cfg["model"],
         "request": request,
         "context": report,
-        "usage": {"input_tokens": usage.get("prompt_tokens"),
-                  "output_tokens": usage.get("completion_tokens"),
-                  "cost": usage.get("cost")},
+        "usage": {
+            "input_tokens": usage.get("prompt_tokens"),
+            "output_tokens": usage.get("completion_tokens"),
+            "cost": usage.get("cost"),
+        },
         "answer": content,
     }
-    file_stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    file_stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
     (state_dir / f"{file_stamp}.json").write_text(
-        json.dumps(payload, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
-    (state_dir / "latest.md").write_text(
-        f"# Вопрос ({stamp})\n\n{request}\n\n---\n\n{content}\n", encoding="utf-8")
+        json.dumps(payload, ensure_ascii=False, indent=1) + "\n", encoding="utf-8"
+    )
+    (state_dir / "latest.md").write_text(f"# Вопрос ({stamp})\n\n{request}\n\n---\n\n{content}\n", encoding="utf-8")
     if args.out:
         Path(os.path.expanduser(args.out)).write_text(content + "\n", encoding="utf-8")
     payload["artifact"] = str(state_dir / f"{file_stamp}.json")

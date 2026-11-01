@@ -17,6 +17,7 @@ CLI:
 
 Exit codes: 0 — a valid contract was produced, 1 — failure.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -26,7 +27,7 @@ import re
 import subprocess
 import sys
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 BIN = Path(__file__).resolve().parent
@@ -43,7 +44,8 @@ from plan_task import (  # noqa: E402
 
 BAD_MONEY_TYPES = {"float", "float4", "float8", "double", "double precision", "real"}
 
-OUTLINE_PROMPT = """You are the data architect of an application built by an automated
+OUTLINE_PROMPT = (
+    """You are the data architect of an application built by an automated
 development pipeline. You design the DATABASE-SCHEMA CONTRACT: aggregates (bounded contexts),
 their tables, and the conventions every later task must follow. You are not writing SQLAlchemy
 code, migrations or queries.
@@ -83,9 +85,12 @@ Rules:
   `growth`, not in prose.
 - no lookup tables that replace SDE; no EAV; no polymorphic `entity_id`.
 - Table purposes, column comments and growth notes are written in ENGLISH: the contract is a
-  repository artefact, not a chat message. Identifiers and types are English too.""" + HOUSE_RULES
+  repository artefact, not a chat message. Identifiers and types are English too."""
+    + HOUSE_RULES
+)
 
-EXPAND_PROMPT = """You are the data architect of an automated pipeline. Expand exactly ONE
+EXPAND_PROMPT = (
+    """You are the data architect of an automated pipeline. Expand exactly ONE
 aggregate of an already agreed schema outline into complete table definitions.
 
 Answer with exactly one JSON object:
@@ -119,7 +124,9 @@ Rules:
 - big tables: state upsert key / retention / partition in `growth`.
 - `comment` only where the column name alone is not enough.
 - Table purposes, column comments and growth notes are written in ENGLISH: the contract is a
-  repository artefact. Identifiers and types are English too.""" + HOUSE_RULES
+  repository artefact. Identifiers and types are English too."""
+    + HOUSE_RULES
+)
 
 
 def load_request(value: str) -> str:
@@ -130,12 +137,25 @@ def record(cfg: dict, usage: dict, feature: str, task_id: str) -> None:
     if os.environ.get("SCHEMA_NO_LEDGER") == "1":
         return
     cmd = [
-        sys.executable, str(BIN / "usage.py"), "record",
-        "-p", cfg["slug"], "-f", feature, "-t", task_id, "-r", "architect",
-        "-m", cfg["model"],
-        "--input", str(int(usage.get("prompt_tokens") or 0)),
-        "--output", str(int(usage.get("completion_tokens") or 0)),
-        "--note", "schema_design.py",
+        sys.executable,
+        str(BIN / "usage.py"),
+        "record",
+        "-p",
+        cfg["slug"],
+        "-f",
+        feature,
+        "-t",
+        task_id,
+        "-r",
+        "architect",
+        "-m",
+        cfg["model"],
+        "--input",
+        str(int(usage.get("prompt_tokens") or 0)),
+        "--output",
+        str(int(usage.get("completion_tokens") or 0)),
+        "--note",
+        "schema_design.py",
     ]
     cached = int((usage.get("prompt_tokens_details") or {}).get("cached_tokens") or 0)
     if cached:
@@ -143,8 +163,7 @@ def record(cfg: dict, usage: dict, feature: str, task_id: str) -> None:
     subprocess.run(cmd, capture_output=True, text=True)
 
 
-def call_json(cfg: dict, system: str, user: str, feature: str, task_id: str,
-              raw_dir: Path | None = None) -> dict:
+def call_json(cfg: dict, system: str, user: str, feature: str, task_id: str, raw_dir: Path | None = None) -> dict:
     content, usage = call_model_stream(cfg, system, user, idle_timeout=240)
     if raw_dir:
         raw_dir.mkdir(parents=True, exist_ok=True)
@@ -152,7 +171,8 @@ def call_json(cfg: dict, system: str, user: str, feature: str, task_id: str,
     if usage.get("_finish_reason") == "length":
         raise SystemExit(
             f"ERROR: {task_id}: the answer was cut at max_tokens="
-            f"{cfg['max_tokens']}; the stage asks for too much in one response")
+            f"{cfg['max_tokens']}; the stage asks for too much in one response"
+        )
     answer = extract_json(content)
     record(cfg, usage, feature, task_id)
     return answer
@@ -164,16 +184,14 @@ def roadmap_context(path: Path) -> str:
         return ""
     data = json.loads(path.read_text(encoding="utf-8"))
     roadmap = data.get("roadmap", data)
-    lines = ["PRODUCT SUMMARY", str(roadmap.get("product_summary", "")).strip(), "",
-             "HARD CONSTRAINTS"]
+    lines = ["PRODUCT SUMMARY", str(roadmap.get("product_summary", "")).strip(), "", "HARD CONSTRAINTS"]
     lines += [f"- {item}" for item in roadmap.get("constraints") or []]
     lines += ["", "STAGES AND TASKS (what the schema has to serve)"]
     for stage in roadmap.get("stages") or []:
         lines += ["", f"## {stage.get('id')} — {stage.get('title')}: {stage.get('intent', '')}"]
         for task in stage.get("tasks") or []:
             goal = re.sub(r"\s+", " ", str(task.get("goal", ""))).strip()
-            lines.append(f"- {task.get('id')} [{task.get('size')}] {task.get('title')}: "
-                         f"{goal[:400]}")
+            lines.append(f"- {task.get('id')} [{task.get('size')}] {task.get('title')}: {goal[:400]}")
     return "\n".join(lines)
 
 
@@ -192,8 +210,7 @@ def normalise(aggregates: list[dict], expanded: list[dict]) -> tuple[dict, list[
         if not tables:
             missing.append(item["aggregate_id"])
     for agg in by_id.values():
-        if not isinstance(agg.get("tables"), list) or any(
-                not isinstance(t, dict) for t in agg["tables"]):
+        if not isinstance(agg.get("tables"), list) or any(not isinstance(t, dict) for t in agg["tables"]):
             agg["tables"] = [t for t in agg.get("tables") or [] if isinstance(t, dict)]
             if agg["id"] not in missing:
                 missing.append(agg["id"])
@@ -255,18 +272,21 @@ def validate(schema: dict) -> tuple[list[str], list[str]]:
                 else:
                     for cname in ref_cols:
                         if cname not in target_cols:
-                            errors.append(f"{name}: composite FK references unknown column "
-                                          f"{ref_table}.{cname}")
+                            errors.append(f"{name}: composite FK references unknown column {ref_table}.{cname}")
                     wanted = {ref_table: tuple(ref_cols)}
                     declared = " ".join(
-                        str(c) for tb in schema["aggregates"]
-                        for tb2 in tb.get("tables") or [] if tb2.get("name") == ref_table
-                        for c in tb2.get("constraints") or [])
+                        str(c)
+                        for tb in schema["aggregates"]
+                        for tb2 in tb.get("tables") or []
+                        if tb2.get("name") == ref_table
+                        for c in tb2.get("constraints") or []
+                    )
                     for cname in ref_cols:
                         wanted.setdefault(ref_table, ())
                     if all(cname in declared for cname in ref_cols) is False:
-                        warnings.append(f"{name}: composite FK target {ref_table}{tuple(ref_cols)} "
-                                        "is not declared unique")
+                        warnings.append(
+                            f"{name}: composite FK target {ref_table}{tuple(ref_cols)} is not declared unique"
+                        )
             account_col = seen.get("account_id")
             if account_col:
                 ref = account_col.get("references") or {}
@@ -282,11 +302,9 @@ def validate(schema: dict) -> tuple[list[str], list[str]]:
                     continue
                 target_table, target_col = ref.get("table"), ref.get("column")
                 if target_table not in columns:
-                    errors.append(f"{table['name']}.{col['name']}: references unknown table "
-                                  f"{target_table!r}")
+                    errors.append(f"{table['name']}.{col['name']}: references unknown table {target_table!r}")
                 elif target_col not in columns[target_table]:
-                    errors.append(f"{table['name']}.{col['name']}: unknown column "
-                                  f"{target_table}.{target_col}")
+                    errors.append(f"{table['name']}.{col['name']}: unknown column {target_table}.{target_col}")
     return errors, warnings
 
 
@@ -304,7 +322,7 @@ def dbml(schema: dict, groups: bool = True) -> str:
     if groups:
         for agg in schema["aggregates"]:
             members = " ".join(f'"{t["name"]}"' for t in agg.get("tables") or [])
-            out += [f'TableGroup {agg["id"]} {{', f"  {members}", "}", ""]
+            out += [f"TableGroup {agg['id']} {{", f"  {members}", "}", ""]
     refs: list[str] = []
     for agg in schema["aggregates"]:
         for table in agg.get("tables") or []:
@@ -330,8 +348,7 @@ def dbml(schema: dict, groups: bool = True) -> str:
                 ref = col.get("references") or {}
                 if ref.get("table"):
                     on_delete = str(ref.get("on_delete") or "").lower()
-                    rel = f'Ref: "{table["name"]}"."{col["name"]}" > ' \
-                          f'"{ref["table"]}"."{ref.get("column", "id")}"'
+                    rel = f'Ref: "{table["name"]}"."{col["name"]}" > "{ref["table"]}"."{ref.get("column", "id")}"'
                     if on_delete and on_delete != "no action":
                         rel += f" [delete: {on_delete}]"
                     refs.append(rel)
@@ -352,8 +369,7 @@ def dbml(schema: dict, groups: bool = True) -> str:
             for composite in table.get("foreign_keys") or []:
                 left = ", ".join(f'"{c}"' for c in composite.get("columns") or [])
                 right = ", ".join(f'"{c}"' for c in composite.get("references_columns") or [])
-                rel = (f'Ref: "{table["name"]}".({left}) > '
-                       f'"{composite.get("references_table")}".({right})')
+                rel = f'Ref: "{table["name"]}".({left}) > "{composite.get("references_table")}".({right})'
                 on_delete = str(composite.get("on_delete") or "").lower()
                 if on_delete and on_delete != "no action":
                     rel += f" [delete: {on_delete}]"
@@ -371,21 +387,35 @@ def markdown(schema: dict) -> str:
     total = sum(len(a.get("tables") or []) for a in schema["aggregates"])
     lines += ["", f"Агрегатов: {len(schema['aggregates'])}, таблиц: {total}", ""]
     for agg in schema["aggregates"]:
-        lines += [f"## {agg['id']} — {agg.get('title', '')}", "",
-                  str(agg.get("purpose", "")).strip(), "",
-                  f"`{agg.get('owner_module', '')}` · жизненный цикл: {agg.get('lifetime', '')}", ""]
+        lines += [
+            f"## {agg['id']} — {agg.get('title', '')}",
+            "",
+            str(agg.get("purpose", "")).strip(),
+            "",
+            f"`{agg.get('owner_module', '')}` · жизненный цикл: {agg.get('lifetime', '')}",
+            "",
+        ]
         for table in agg.get("tables") or []:
-            lines += [f"### {table['name']}", "", str(table.get("purpose", "")).strip(), "",
-                      "| колонка | тип | ключ | ссылка |", "|---|---|---|---|"]
+            lines += [
+                f"### {table['name']}",
+                "",
+                str(table.get("purpose", "")).strip(),
+                "",
+                "| колонка | тип | ключ | ссылка |",
+                "|---|---|---|---|",
+            ]
             for col in table.get("columns") or []:
                 key = "PK" if col.get("pk") else ("UQ" if col.get("unique") else "")
                 ref = col.get("references") or {}
-                ref_s = (f"→ {ref.get('table')}.{ref.get('column')}"
-                         f" ({ref.get('on_delete')})") if ref.get("table") else ""
+                ref_s = (
+                    (f"→ {ref.get('table')}.{ref.get('column')} ({ref.get('on_delete')})") if ref.get("table") else ""
+                )
                 lines.append(f"| {col['name']} | {col['type']} | {key} | {ref_s} |")
             if table.get("indexes"):
-                lines += ["", "Индексы: " + ", ".join(
-                    f"({', '.join(i.get('columns') or [])})" for i in table["indexes"])]
+                lines += [
+                    "",
+                    "Индексы: " + ", ".join(f"({', '.join(i.get('columns') or [])})" for i in table["indexes"]),
+                ]
             if table.get("constraints"):
                 lines += ["Ограничения: " + "; ".join(table["constraints"])]
             if table.get("growth"):
@@ -394,8 +424,9 @@ def markdown(schema: dict) -> str:
     return "\n".join(lines) + "\n"
 
 
-def generate(cfg: dict, brief: str, requirements: str, repo: Path, out_dir: Path,
-             workers: int) -> tuple[dict, list[str], list[str]]:
+def generate(
+    cfg: dict, brief: str, requirements: str, repo: Path, out_dir: Path, workers: int
+) -> tuple[dict, list[str], list[str]]:
     """Outline then per-aggregate expansion; returns (schema, errors, warnings)."""
     base = (
         "TASK BRIEF (the customer's own statement of the schema contract)\n"
@@ -416,22 +447,27 @@ def generate(cfg: dict, brief: str, requirements: str, repo: Path, out_dir: Path
     shared = (
         "GLOBAL CONVENTIONS (already agreed, do not contradict)\n"
         + json.dumps(outline.get("conventions") or [], ensure_ascii=False)
-        + "\n\nENUMS\n" + json.dumps(outline.get("enums") or [], ensure_ascii=False)
+        + "\n\nENUMS\n"
+        + json.dumps(outline.get("enums") or [], ensure_ascii=False)
         + "\n\nTHE WHOLE OUTLINE (use these exact table and column names)\n"
-        + json.dumps([{k: a.get(k) for k in ("id", "title", "purpose", "lifetime",
-                                             "tables", "relations")} for a in aggregates],
-                     ensure_ascii=False)
+        + json.dumps(
+            [{k: a.get(k) for k in ("id", "title", "purpose", "lifetime", "tables", "relations")} for a in aggregates],
+            ensure_ascii=False,
+        )
     )
 
     def expand(agg: dict) -> dict:
-        user = (f"EXPAND AGGREGATE {agg['id']} — {agg.get('title')}\n"
-                f"Purpose: {agg.get('purpose')}\n"
-                f"Lifetime: {agg.get('lifetime')}\n"
-                f"Tables planned: {json.dumps(agg.get('tables') or [], ensure_ascii=False)}\n"
-                f"Relations: {json.dumps(agg.get('relations') or [], ensure_ascii=False)}\n\n"
-                + shared + "\n\nTASK BRIEF\n" + brief)
-        answer = call_json(cfg, EXPAND_PROMPT, user, f"_schema:{agg['id']}",
-                           agg["id"], raw_dir)
+        user = (
+            f"EXPAND AGGREGATE {agg['id']} — {agg.get('title')}\n"
+            f"Purpose: {agg.get('purpose')}\n"
+            f"Lifetime: {agg.get('lifetime')}\n"
+            f"Tables planned: {json.dumps(agg.get('tables') or [], ensure_ascii=False)}\n"
+            f"Relations: {json.dumps(agg.get('relations') or [], ensure_ascii=False)}\n\n"
+            + shared
+            + "\n\nTASK BRIEF\n"
+            + brief
+        )
+        answer = call_json(cfg, EXPAND_PROMPT, user, f"_schema:{agg['id']}", agg["id"], raw_dir)
         return {"aggregate_id": agg["id"], "answer": answer}
 
     with ThreadPoolExecutor(max_workers=max(1, workers)) as pool:
@@ -450,27 +486,24 @@ def generate(cfg: dict, brief: str, requirements: str, repo: Path, out_dir: Path
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(
-        description="Design the database-schema contract and emit DBML for dbdiagram.io.")
+    parser = argparse.ArgumentParser(description="Design the database-schema contract and emit DBML for dbdiagram.io.")
     parser.add_argument("--project", required=True)
     parser.add_argument("--request", required=True, help="text or @path")
     parser.add_argument("--roadmap", help="roadmap.json to derive data requirements from")
     parser.add_argument("--repo", help="repository path; defaults to ~/projects/<slug>")
     parser.add_argument("--out-dir", help="artifact directory; defaults to the state dir")
     parser.add_argument("--workers", type=int, default=4)
-    parser.add_argument("--slice", metavar="AGGREGATE",
-                        help="print one aggregate slice of the contract and exit")
-    parser.add_argument("--no-groups", action="store_true",
-                        help="omit TableGroup blocks in DBML (a paid dbdiagram.io feature)")
-    parser.add_argument("--reemit", help="regenerate artifacts from an existing schema.json "
-                                         "without calling the model")
+    parser.add_argument("--slice", metavar="AGGREGATE", help="print one aggregate slice of the contract and exit")
+    parser.add_argument(
+        "--no-groups", action="store_true", help="omit TableGroup blocks in DBML (a paid dbdiagram.io feature)"
+    )
+    parser.add_argument("--reemit", help="regenerate artifacts from an existing schema.json without calling the model")
     args = parser.parse_args()
 
     repo = Path(os.path.expanduser(args.repo or f"~/projects/{args.project}"))
     cfg = project_config(args.project)
     cfg["slug"] = args.project
-    out_dir = Path(os.path.expanduser(args.out_dir)) if args.out_dir else \
-        STATE / args.project / "schema"
+    out_dir = Path(os.path.expanduser(args.out_dir)) if args.out_dir else STATE / args.project / "schema"
     out_dir.mkdir(parents=True, exist_ok=True)
     (out_dir / "contract").mkdir(exist_ok=True)
 
@@ -490,36 +523,44 @@ def main() -> int:
         errors = list((payload.get("validation") or {}).get("errors") or [])
         warnings = list((payload.get("validation") or {}).get("warnings") or [])
     else:
-        schema, errors, warnings = generate(cfg, brief, requirements, repo, out_dir,
-                                            args.workers)
+        schema, errors, warnings = generate(cfg, brief, requirements, repo, out_dir, args.workers)
         for warning in warnings:
             print("warn: " + warning, file=sys.stderr)
-    stamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-    payload = {"project": args.project, "generated_at": stamp, "model": cfg["model"],
-               "validation": {"ok": not errors, "errors": errors, "warnings": warnings},
-               "schema": schema}
+    stamp = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+    payload = {
+        "project": args.project,
+        "generated_at": stamp,
+        "model": cfg["model"],
+        "validation": {"ok": not errors, "errors": errors, "warnings": warnings},
+        "schema": schema,
+    }
 
-    (out_dir / "schema.json").write_text(json.dumps(payload, ensure_ascii=False, indent=1) + "\n",
-                                         encoding="utf-8")
-    (out_dir / "schema.dbml").write_text(dbml(schema, groups=not args.no_groups),
-                                        encoding="utf-8")
+    (out_dir / "schema.json").write_text(json.dumps(payload, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
+    (out_dir / "schema.dbml").write_text(dbml(schema, groups=not args.no_groups), encoding="utf-8")
     (out_dir / "schema.md").write_text(markdown(schema), encoding="utf-8")
     for agg in schema["aggregates"]:
         (out_dir / "contract" / f"{agg['id']}.json").write_text(
-            json.dumps(agg, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
+            json.dumps(agg, ensure_ascii=False, indent=1) + "\n", encoding="utf-8"
+        )
 
     summary = {
         "project": args.project,
-        "artifacts": {"json": str(out_dir / "schema.json"),
-                      "dbml": str(out_dir / "schema.dbml"),
-                      "markdown": str(out_dir / "schema.md"),
-                      "contracts": str(out_dir / "contract")},
+        "artifacts": {
+            "json": str(out_dir / "schema.json"),
+            "dbml": str(out_dir / "schema.dbml"),
+            "markdown": str(out_dir / "schema.md"),
+            "contracts": str(out_dir / "contract"),
+        },
         "aggregates": len(schema["aggregates"]),
         "tables": sum(len(a.get("tables") or []) for a in schema["aggregates"]),
-        "columns": sum(len(t.get("columns") or []) for a in schema["aggregates"]
-                       for t in a.get("tables") or []),
-        "refs": sum(1 for a in schema["aggregates"] for t in a.get("tables") or []
-                    for c in t.get("columns") or [] if (c.get("references") or {}).get("table")),
+        "columns": sum(len(t.get("columns") or []) for a in schema["aggregates"] for t in a.get("tables") or []),
+        "refs": sum(
+            1
+            for a in schema["aggregates"]
+            for t in a.get("tables") or []
+            for c in t.get("columns") or []
+            if (c.get("references") or {}).get("table")
+        ),
         "migration_order": [m.get("aggregate") for m in schema["migration_order"]],
         "validation": {"ok": not errors, "errors": errors, "warnings": warnings},
     }

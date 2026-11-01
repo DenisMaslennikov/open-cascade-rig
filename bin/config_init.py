@@ -19,6 +19,7 @@ CLI:
 
 Exit 0 — in sync (or the action succeeded), 1 — drift found / action failed.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -27,6 +28,8 @@ import os
 import shutil
 import sys
 from pathlib import Path
+
+from rig_conf import RIG_ENV, rig_repo
 
 LIVE = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "cascade"
 
@@ -61,32 +64,51 @@ def check(repo: Path) -> int:
         rows.append({"item": name, "canonical": str(c), "live": str(l), "state": state})
 
     roles_live = live("roles.yaml")
-    rows.append({"item": "roles.yaml", "canonical": str(canonical(repo, "roles.example.yaml")),
-                 "live": str(roles_live),
-                 "state": "present (local, intentional)" if roles_live.exists() else "missing — run --materialize"})
+    rows.append(
+        {
+            "item": "roles.yaml",
+            "canonical": str(canonical(repo, "roles.example.yaml")),
+            "live": str(roles_live),
+            "state": "present (local, intentional)" if roles_live.exists() else "missing — run --materialize",
+        }
+    )
 
     projects = sorted((LIVE / "projects").glob("*.yaml")) if (LIVE / "projects").exists() else []
-    rows.append({"item": "projects/*.yaml", "canonical": str(canonical(repo, "projects")),
-                 "live": str(LIVE / "projects"),
-                 "state": f"{len(projects)} live project file(s): {', '.join(p.stem for p in projects)}"})
+    rows.append(
+        {
+            "item": "projects/*.yaml",
+            "canonical": str(canonical(repo, "projects")),
+            "live": str(LIVE / "projects"),
+            "state": f"{len(projects)} live project file(s): {', '.join(p.stem for p in projects)}",
+        }
+    )
 
     keys = LIVE / "keys.env"
-    rows.append({"item": "keys.env", "canonical": "(never in the repository)", "live": str(keys),
-                 "state": "present" if keys.exists() else "missing"})
+    rows.append(
+        {
+            "item": "keys.env",
+            "canonical": "(never in the repository)",
+            "live": str(keys),
+            "state": "present" if keys.exists() else "missing",
+        }
+    )
 
-    print("\n".join(
-        f"{row['item']:16} {row['state']:45} {row['live']}" for row in rows))
+    print("\n".join(f"{row['item']:16} {row['state']:45} {row['live']}" for row in rows))
     if drift:
-        print(f"\n{drift} item(s) drifted from the repository. Live copies must be symlinks; "
-              f"run `config_init.py --link` after moving any local edit into the repository.")
+        print(
+            f"\n{drift} item(s) drifted from the repository. Live copies must be symlinks; "
+            f"run `config_init.py --link` after moving any local edit into the repository."
+        )
     return 1 if drift else 0
 
 
 def link(repo: Path, dry: bool) -> int:
     failures = 0
-    targets = {"prompts": (repo / "config" / "prompts", LIVE / "prompts"),
-               "schema": (repo / "config" / "schema", LIVE / "schema"),
-               "bin": (repo / "bin", LIVE / "bin")}
+    targets = {
+        "prompts": (repo / "config" / "prompts", LIVE / "prompts"),
+        "schema": (repo / "config" / "schema", LIVE / "schema"),
+        "bin": (repo / "bin", LIVE / "bin"),
+    }
     for name, (source, target) in targets.items():
         if not source.exists():
             continue
@@ -96,8 +118,10 @@ def link(repo: Path, dry: bool) -> int:
         if target.exists() and not target.is_symlink():
             # Never silently discard a local edit: the caller has to move it into the repository first.
             if name in ("prompts", "schema") and not same(source, target):
-                print(f"{name:8} REFUSED: {target} differs from {source}. "
-                      f"Copy the difference into the repository first (a prompt edit is a commit).")
+                print(
+                    f"{name:8} REFUSED: {target} differs from {source}. "
+                    f"Copy the difference into the repository first (a prompt edit is a commit)."
+                )
                 failures += 1
                 continue
             backup = target.with_suffix(target.suffix + ".pre-link.bak")
@@ -131,7 +155,7 @@ def materialize(repo: Path, slug: str, force: bool) -> int:
 
 def main() -> int:
     ap = argparse.ArgumentParser(description="Keep the live cascade config and the repository in step")
-    ap.add_argument("--repo", default=str(Path.home() / "projects" / "cascade-rig"))
+    ap.add_argument("--repo", help=f"the cascade-rig checkout; default: ${RIG_ENV} or the current directory")
     ap.add_argument("--check", action="store_true")
     ap.add_argument("--link", action="store_true")
     ap.add_argument("--materialize", action="store_true")
@@ -139,7 +163,7 @@ def main() -> int:
     ap.add_argument("--force", action="store_true")
     ap.add_argument("--dry-run", action="store_true")
     args = ap.parse_args()
-    repo = Path(args.repo).expanduser()
+    repo = rig_repo(args.repo)
     if not (repo / "config").exists():
         print(f"ERROR: no config directory in {repo}", file=sys.stderr)
         return 1

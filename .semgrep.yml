@@ -1,0 +1,78 @@
+rules:
+  # The rule is ERROR everywhere the gate can enforce it today. The five scripts below still carry
+  # function-level imports written before this gate existed; they are reported by the second rule at
+  # WARNING severity, so the debt stays visible in every run without turning main red. The card that
+  # hoists them deletes that second rule.
+  - id: no-local-imports-legacy
+    languages: [python]
+    message: >-
+      Known debt: this file still imports inside functions. It is tracked on the board; do not add a
+      new one here, and delete this rule for the file once the card is done.
+    severity: WARNING
+    patterns:
+      - pattern-inside: |
+          def $F(...):
+              ...
+      - pattern-either:
+          - pattern: import $M
+          - pattern: from $M import $X
+    paths:
+      include:
+        - "bin/pr_review.py"
+        - "bin/run_role.py"
+        - "bin/run_subtask.py"
+        - "bin/specify_task.py"
+        - "bin/validate_plan.py"
+
+  - id: no-local-imports
+    languages: [python]
+    message: >-
+      Local (function-level) imports are forbidden: move the import to the module top. If a circular
+      import stands in the way, raise it for a human decision with options (shared module, inverted
+      dependency, split module) instead of hiding the cycle inside a function.
+    severity: ERROR
+    patterns:
+      - pattern-inside: |
+          def $F(...):
+              ...
+      - pattern-either:
+          - pattern: import $M
+          - pattern: from $M import $X
+    paths:
+      include:
+        - "tests/**"
+        - "bin/**"
+      exclude:
+        - "bin/pr_review.py"
+        - "bin/run_role.py"
+        - "bin/run_subtask.py"
+        - "bin/specify_task.py"
+        - "bin/validate_plan.py"
+
+  - id: no-bare-noqa
+    languages: [python]
+    message: >-
+      A bare `noqa` hides the defect the rule exists to catch. Give the code with a reason
+      (`# noqa: E501 — <why>`), or fix it. A reviewer treats an unexplained suppression as a finding.
+    severity: WARNING
+    patterns:
+      - pattern-regex: '#\s*noqa\s*$'
+    paths:
+      include:
+        - "bin/**"
+        - "tests/**"
+
+  - id: no-environment-defaults
+    languages: [python]
+    message: >-
+      An environment-specific value as a fallback default (a URL with a host, an IP address, an
+      absolute home path) only works on the machine it was typed on, and it hides that the machine was
+      never configured. Read the value from the project config or an environment variable, and fail
+      with an instruction when neither is set.
+    severity: ERROR
+    patterns:
+      - pattern-regex: '(os\.environ\.get|os\.getenv)\([^)]*,\s*[fbru]*["\x27][^"\x27]*([a-z]+://|[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}|/home/|~/)[^"\x27]*["\x27]'
+    paths:
+      include:
+        - "bin/**"
+        - "tests/**"

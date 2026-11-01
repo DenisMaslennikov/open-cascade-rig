@@ -21,6 +21,7 @@ CLI:
 Output: one JSON object on stdout. Exit 0 — reviewed clean (or nothing to fix),
 1 — escalated or a step failed.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -29,7 +30,7 @@ import os
 import re
 import subprocess
 import sys
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 BIN = Path(__file__).resolve().parent
@@ -86,13 +87,13 @@ def review_brief(project: str, subtask: str, worktree: Path) -> Path:
         "If the code is fine, write `## Findings` with the single line `- none` — an empty review is "
         "a valid review, and an invented finding is worse than none. The `## Что проверить человеку` "
         "section is optional: omit it when there is nothing a human must decide.\n",
-        encoding="utf-8")
+        encoding="utf-8",
+    )
     return out
 
 
 def notify(text: str) -> None:
-    subprocess.run([sys.executable, str(BIN / "notify.py"), "--text", text],
-                   capture_output=True, text=True)
+    subprocess.run([sys.executable, str(BIN / "notify.py"), "--text", text], capture_output=True, text=True)
 
 
 def main() -> int:
@@ -102,21 +103,36 @@ def main() -> int:
     ap.add_argument("--subtask", required=True)
     ap.add_argument("--worktree", required=True)
     ap.add_argument("--max-rounds", type=int, default=3)
-    ap.add_argument("--engine", default="pr", choices=("pr", "agent"),
-                    help="pr = one pr-agent call over the plain diff (cheap, the right default for "
-                         "a subtask); agent = read-only OpenHands reviewer that reads the "
-                         "repository (expensive per turn: the whole conversation is resent)")
+    ap.add_argument(
+        "--engine",
+        default="pr",
+        choices=("pr", "agent"),
+        help="pr = one pr-agent call over the plain diff (cheap, the right default for "
+        "a subtask); agent = read-only OpenHands reviewer that reads the "
+        "repository (expensive per turn: the whole conversation is resent)",
+    )
     ap.add_argument("--role", default="reviewer", choices=("reviewer", "reviewer_final"))
     ap.add_argument("--model", help="override the reviewer model")
-    ap.add_argument("--budget", type=float, default=4.0,
-                    help="per-round agent budget in USD; a review that reads a repository costs "
-                         "more than the 2.0 default of run_role and dies mid-read")
-    ap.add_argument("--iterations", type=int, default=12,
-                    help="agent iteration cap per round. The cost of a review is dominated by "
-                         "re-sending the conversation each turn: 30+ iterations on one diff means "
-                         "the reviewer is browsing, not reviewing")
-    ap.add_argument("--fix-model", help="model for the rework pass (the executor gate stays the "
-                                        "same); the owner wants a cheap flash model for fixes")
+    ap.add_argument(
+        "--budget",
+        type=float,
+        default=4.0,
+        help="per-round agent budget in USD; a review that reads a repository costs "
+        "more than the 2.0 default of run_role and dies mid-read",
+    )
+    ap.add_argument(
+        "--iterations",
+        type=int,
+        default=12,
+        help="agent iteration cap per round. The cost of a review is dominated by "
+        "re-sending the conversation each turn: 30+ iterations on one diff means "
+        "the reviewer is browsing, not reviewing",
+    )
+    ap.add_argument(
+        "--fix-model",
+        help="model for the rework pass (the executor gate stays the "
+        "same); the owner wants a cheap flash model for fixes",
+    )
     ap.add_argument("--python", help="interpreter that can import the backend dependencies")
     ap.add_argument("--notify", action="store_true", help="send the escalation to Telegram")
     ap.add_argument("--dry-run", action="store_true", help="review once, fix nothing")
@@ -125,7 +141,7 @@ def main() -> int:
     worktree = Path(args.worktree).expanduser().resolve()
     brief = review_brief(args.project, args.subtask, worktree)
     rounds: list[dict] = []
-    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
 
     for round_number in range(1, args.max_rounds + 1):
         if args.engine == "pr":
@@ -133,12 +149,22 @@ def main() -> int:
             # an agent that re-reads the repo spends dollars on re-sending the conversation.
             diff_file = STATE / args.project / "reviews" / f"{args.subtask}-round{round_number}.diff"
             diff_file.parent.mkdir(parents=True, exist_ok=True)
-            diff_text = subprocess.run(["git", "diff", "origin/main...HEAD"], cwd=worktree,
-                                       capture_output=True, text=True).stdout
+            diff_text = subprocess.run(
+                ["git", "diff", "origin/main...HEAD"], cwd=worktree, capture_output=True, text=True
+            ).stdout
             diff_file.write_text(diff_text, encoding="utf-8")
-            review_cmd = [sys.executable, str(BIN / "pr_review.py"), "--project", args.project,
-                          "--mode", "diff", "--diff", str(diff_file),
-                          "--what", f"subtask {args.subtask} of the OCCC cascade"]
+            review_cmd = [
+                sys.executable,
+                str(BIN / "pr_review.py"),
+                "--project",
+                args.project,
+                "--mode",
+                "diff",
+                "--diff",
+                str(diff_file),
+                "--what",
+                f"subtask {args.subtask} of the OCCC cascade",
+            ]
             if args.role == "reviewer_final":
                 review_cmd.append("--final")
             if args.model:
@@ -146,56 +172,118 @@ def main() -> int:
             review, code, tail = run_json(review_cmd, worktree, timeout=3600)
             report_path = review.get("review")
         else:
-            review_cmd = [sys.executable, str(BIN / "run_role.py"), "--project", args.project,
-                          "--role", args.role, "--request", f"@{brief}", "--worktree", str(worktree)]
+            review_cmd = [
+                sys.executable,
+                str(BIN / "run_role.py"),
+                "--project",
+                args.project,
+                "--role",
+                args.role,
+                "--request",
+                f"@{brief}",
+                "--worktree",
+                str(worktree),
+            ]
             if args.model:
                 review_cmd += ["--model", args.model]
             review_cmd += ["--budget", str(args.budget), "--iterations", str(args.iterations)]
             review, code, tail = run_json(review_cmd, worktree, timeout=3600)
             report_path = review.get("report")
-        report = Path(report_path).read_text(encoding="utf-8") if report_path and Path(
-            report_path).exists() else ""
+        report = Path(report_path).read_text(encoding="utf-8") if report_path and Path(report_path).exists() else ""
         findings = parse_findings(report)
         blocking = [f for f in findings if f["severity"] in BLOCKING]
         if args.engine == "pr" and not findings and review.get("verdict") == "block":
             # pr-agent does not tag severities consistently; its own verdict is the signal.
             blocking = [{"severity": "blocker", "text": "pr-agent verdict: block — see the report"}]
             findings = blocking
-        record = {"round": round_number, "review_ok": bool(review.get("ok")), "model": review.get("model"),
-                  "report": report_path, "findings": findings, "blocking": len(blocking),
-                  "usage": review.get("usage")}
+        record = {
+            "round": round_number,
+            "review_ok": bool(review.get("ok")),
+            "model": review.get("model"),
+            "report": report_path,
+            "findings": findings,
+            "blocking": len(blocking),
+            "usage": review.get("usage"),
+        }
         rounds.append(record)
         # An unparsed answer is a failed review, not a clean one: silence must never read as
         # "nothing to fix" (that is how a wrong diff gets merged with a green light).
         if not review.get("ok") or not report_path or not Path(report_path).exists():
-            record["error"] = (f"the review produced no usable answer (exit {code}); stdout tail: "
-                              f"{tail[-400:]}")
-            print(json.dumps({"project": args.project, "subtask": args.subtask, "rounds": rounds,
-                              "status": "failed", "stamp": stamp}, ensure_ascii=False, indent=1))
+            record["error"] = f"the review produced no usable answer (exit {code}); stdout tail: {tail[-400:]}"
+            print(
+                json.dumps(
+                    {
+                        "project": args.project,
+                        "subtask": args.subtask,
+                        "rounds": rounds,
+                        "status": "failed",
+                        "stamp": stamp,
+                    },
+                    ensure_ascii=False,
+                    indent=1,
+                )
+            )
             return 1
         if code != 0 and not findings:
             record["error"] = f"the review run failed (exit {code}) without findings: {tail[-500:]}"
-            print(json.dumps({"project": args.project, "subtask": args.subtask, "rounds": rounds,
-                              "status": "failed", "stamp": stamp}, ensure_ascii=False, indent=1))
+            print(
+                json.dumps(
+                    {
+                        "project": args.project,
+                        "subtask": args.subtask,
+                        "rounds": rounds,
+                        "status": "failed",
+                        "stamp": stamp,
+                    },
+                    ensure_ascii=False,
+                    indent=1,
+                )
+            )
             return 1
         if not blocking or args.dry_run:
             status = "clean" if not blocking else "reviewed (dry run)"
-            print(json.dumps({"project": args.project, "subtask": args.subtask, "rounds": rounds,
-                              "status": status, "stamp": stamp}, ensure_ascii=False, indent=1))
+            print(
+                json.dumps(
+                    {
+                        "project": args.project,
+                        "subtask": args.subtask,
+                        "rounds": rounds,
+                        "status": status,
+                        "stamp": stamp,
+                    },
+                    ensure_ascii=False,
+                    indent=1,
+                )
+            )
             return 0
 
         feedback = "\n".join(f"- [{f['severity']}] {f['text']}" for f in blocking)
-        fix_cmd = [sys.executable, str(BIN / "run_subtask.py"), "--project", args.project,
-                   "--plan", args.plan, "--subtask", args.subtask, "--worktree", str(worktree),
-                   "--feedback", feedback]
+        fix_cmd = [
+            sys.executable,
+            str(BIN / "run_subtask.py"),
+            "--project",
+            args.project,
+            "--plan",
+            args.plan,
+            "--subtask",
+            args.subtask,
+            "--worktree",
+            str(worktree),
+            "--feedback",
+            feedback,
+        ]
         if args.python:
             fix_cmd += ["--python", args.python]
         if args.fix_model:
             fix_cmd += ["--model", args.fix_model]
         fix, fix_code, fix_tail = run_json(fix_cmd, worktree, timeout=3600)
-        record["fix"] = {"exit": fix_code, "ok": bool(fix.get("ok")),
-                         "commit": fix.get("commit"), "error": fix.get("error"),
-                         "tail": None if fix_code == 0 else fix_tail[-500:]}
+        record["fix"] = {
+            "exit": fix_code,
+            "ok": bool(fix.get("ok")),
+            "commit": fix.get("commit"),
+            "error": fix.get("error"),
+            "tail": None if fix_code == 0 else fix_tail[-500:],
+        }
         if fix_code != 0:
             rounds[-1]["fix_failed"] = True
             break
@@ -205,22 +293,41 @@ def main() -> int:
     done = []
     for item in rounds:
         fixes = item.get("fix") or {}
-        applied = ("правка применена, коммит " + str(fixes.get("commit"))[:7]) if fixes.get("ok") \
-            else ("правка не прошла: " + str(fixes.get("error") or "см. лог")) if fixes else "правок не было"
-        done.append(f"  • итерация {item['round']}: ревьюер {item.get('model') or '—'}, "
-                    f"находок {len(item.get('findings') or [])}, блокирующих {item['blocking']} — {applied}")
+        applied = (
+            ("правка применена, коммит " + str(fixes.get("commit"))[:7])
+            if fixes.get("ok")
+            else ("правка не прошла: " + str(fixes.get("error") or "см. лог"))
+            if fixes
+            else "правок не было"
+        )
+        done.append(
+            f"  • итерация {item['round']}: ревьюер {item.get('model') or '—'}, "
+            f"находок {len(item.get('findings') or [])}, блокирующих {item['blocking']} — {applied}"
+        )
     last = rounds[-1] if rounds else {}
     still = [f["text"] for f in (last.get("findings") or []) if f["severity"] in BLOCKING]
     message = (
         f"OCCC · {args.subtask}: ревью не пройдено за {len(rounds)} итерации — нужно решение человека.\n"
         + "\n".join(done)
-        + (f"\nЧто мешает пройти: " + still[0][:300] if still else "\nЧто мешает пройти: ревьюер не выдал отчёт.")
-        + f"\nОтчёт: {last.get('report') or '—'}")
+        + ("\nЧто мешает пройти: " + still[0][:300] if still else "\nЧто мешает пройти: ревьюер не выдал отчёт.")
+        + f"\nОтчёт: {last.get('report') or '—'}"
+    )
     if args.notify:
         notify(message)
-    print(json.dumps({"project": args.project, "subtask": args.subtask, "rounds": rounds,
-                      "status": "escalated", "message": message, "stamp": stamp},
-                     ensure_ascii=False, indent=1))
+    print(
+        json.dumps(
+            {
+                "project": args.project,
+                "subtask": args.subtask,
+                "rounds": rounds,
+                "status": "escalated",
+                "message": message,
+                "stamp": stamp,
+            },
+            ensure_ascii=False,
+            indent=1,
+        )
+    )
     return 1
 
 

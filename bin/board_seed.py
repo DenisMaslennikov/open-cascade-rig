@@ -17,6 +17,7 @@ State:
 
 Exit codes: 0 — the board matches the roadmap, 1 — failure.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -32,8 +33,7 @@ from board import Board  # noqa: E402
 
 STATE = Path(os.environ.get("XDG_STATE_HOME", Path.home() / ".local" / "state")) / "cascade"
 DEFAULT_TITLE = "OCCC — OpenCapsuleerCommandCenter"
-STAGE_COLORS = ["2e7d9a", "2e9a6b", "5b8f3a", "9a8f2e", "9a6b2e", "9a3a4f",
-                "7a3a9a", "3a5f9a", "6b6b6b", "4a4a4a"]
+STAGE_COLORS = ["2e7d9a", "2e9a6b", "5b8f3a", "9a8f2e", "9a6b2e", "9a3a4f", "7a3a9a", "3a5f9a", "6b6b6b", "4a4a4a"]
 
 
 def load_roadmap(path: Path) -> dict:
@@ -86,48 +86,52 @@ def card_body(stage: dict, task: dict) -> str:
 
 
 def stage_body(stage: dict) -> str:
-    return "\n".join([
-        f"**Этап {stage.get('id', '').upper()} — {stage.get('title', '')}**",
-        f"Сложность: {stage.get('complexity', '?')}/5",
-        "",
-        stage.get("intent", ""),
-        "",
-        "**Почему на этом месте**",
-        stage.get("why_here", ""),
-        "",
-        "**Критерии завершения этапа**",
-        "\n".join(f"- [ ] {item}" for item in stage.get("exit_criteria") or []) or "—",
-        "",
-        "**Задачи этапа**",
-        "\n".join(f"- {task.get('id')} — {task.get('title')}" for task in stage.get("tasks") or []),
-    ])
+    return "\n".join(
+        [
+            f"**Этап {stage.get('id', '').upper()} — {stage.get('title', '')}**",
+            f"Сложность: {stage.get('complexity', '?')}/5",
+            "",
+            stage.get("intent", ""),
+            "",
+            "**Почему на этом месте**",
+            stage.get("why_here", ""),
+            "",
+            "**Критерии завершения этапа**",
+            "\n".join(f"- [ ] {item}" for item in stage.get("exit_criteria") or []) or "—",
+            "",
+            "**Задачи этапа**",
+            "\n".join(f"- {task.get('id')} — {task.get('title')}" for task in stage.get("tasks") or []),
+        ]
+    )
 
 
 def designer_body(brief: dict) -> str:
-    return "\n".join([
-        "**Отдельная карточка для роли `designer`.** Дизайнер придумывает интерфейс, но не пишет код.",
-        "Начинать до первой UI-задачи: без токенов, сетки и состояний исполнитель начнёт сочинять дизайн сам.",
-        "",
-        f"**Задача:** {brief.get('title', 'Дизайн-система OCCC')}",
-        "",
-        brief.get("goal", ""),
-        "",
-        "**Что должно быть решено**",
-        "\n".join(f"- [ ] {item}" for item in brief.get("must_cover") or []) or "—",
-        "",
-        "**Вход**",
-        "- ADR 0008 (дизайн-токены и двуязычный каталог), `frontend/src/theme/tokens.ts`",
-        "- Скриншоты текущей оболочки, список страниц из роадмапа",
-        "",
-        "**Выход**",
-        "- design spec: сетка, состояния, состав компонентов, дельта токенов",
-        "- макеты ключевых экранов и потоков (регистрация/скоупы, кабинет, склады, производство, рынок)",
-        "",
-        "**Приёмка**",
-        "- [ ] У каждого экрана из роадмапа есть макет и описанные состояния (пусто/загрузка/ошибка/нет доступа)",
-        "- [ ] Правки токенов оформлены как минимальная дельта к `tokens.ts`, а не «переделать всё»",
-        "- [ ] Компоненты названы и сопоставлены с Ant Design 6 (что берём готовым, что оборачиваем)",
-    ])
+    return "\n".join(
+        [
+            "**Отдельная карточка для роли `designer`.** Дизайнер придумывает интерфейс, но не пишет код.",
+            "Начинать до первой UI-задачи: без токенов, сетки и состояний исполнитель начнёт сочинять дизайн сам.",
+            "",
+            f"**Задача:** {brief.get('title', 'Дизайн-система OCCC')}",
+            "",
+            brief.get("goal", ""),
+            "",
+            "**Что должно быть решено**",
+            "\n".join(f"- [ ] {item}" for item in brief.get("must_cover") or []) or "—",
+            "",
+            "**Вход**",
+            "- ADR 0008 (дизайн-токены и двуязычный каталог), `frontend/src/theme/tokens.ts`",
+            "- Скриншоты текущей оболочки, список страниц из роадмапа",
+            "",
+            "**Выход**",
+            "- design spec: сетка, состояния, состав компонентов, дельта токенов",
+            "- макеты ключевых экранов и потоков (регистрация/скоупы, кабинет, склады, производство, рынок)",
+            "",
+            "**Приёмка**",
+            "- [ ] У каждого экрана из роадмапа есть макет и описанные состояния (пусто/загрузка/ошибка/нет доступа)",
+            "- [ ] Правки токенов оформлены как минимальная дельта к `tokens.ts`, а не «переделать всё»",
+            "- [ ] Компоненты названы и сопоставлены с Ant Design 6 (что берём готовым, что оборачиваем)",
+        ]
+    )
 
 
 def main() -> int:
@@ -135,8 +139,7 @@ def main() -> int:
     parser.add_argument("--project", required=True)
     parser.add_argument("--roadmap", required=True)
     parser.add_argument("--board-title", default=DEFAULT_TITLE)
-    parser.add_argument("--reset", action="store_true",
-                        help="delete previously seeded cards before writing")
+    parser.add_argument("--reset", action="store_true", help="delete previously seeded cards before writing")
     parser.add_argument("--markdown", help="also write a readable markdown digest here")
     args = parser.parse_args()
 
@@ -171,8 +174,7 @@ def main() -> int:
         print("ERROR: the board project has no kanban view", file=sys.stderr)
         return 1
     board = Board(project_id=project_id, view_id=kanban["id"])
-    binding = {"project_id": project_id, "view_id": kanban["id"], "title": args.board_title,
-               "base": board.base}
+    binding = {"project_id": project_id, "view_id": kanban["id"], "title": args.board_title, "base": board.base}
     binding_path.write_text(json.dumps(binding, ensure_ascii=False, indent=1) + "\n")
 
     labels = board.labels()
@@ -181,13 +183,11 @@ def main() -> int:
         name = f"{args.project.upper()} · {stage['id'].upper()} {stage.get('title', '')}"[:80]
         label_id = labels.get(name)
         if not label_id:
-            label_id = board.create_label(name, STAGE_COLORS[index % len(STAGE_COLORS)],
-                                          stage.get("intent", "")[:250])
+            label_id = board.create_label(name, STAGE_COLORS[index % len(STAGE_COLORS)], stage.get("intent", "")[:250])
         label_ids[stage["id"]] = label_id
     designer_label = labels.get(f"{args.project.upper()} · designer")
     if not designer_label:
-        designer_label = board.create_label(f"{args.project.upper()} · designer", "d94f8a",
-                                            "Задачи роли designer")
+        designer_label = board.create_label(f"{args.project.upper()} · designer", "d94f8a", "Задачи роли designer")
 
     cards_path = state_dir / "cards.json"
     cards = json.loads(cards_path.read_text()) if cards_path.exists() else {}
@@ -226,8 +226,11 @@ def main() -> int:
 
     brief = roadmap.get("designer_brief") or {}
     if brief:
-        ensure(f"D0 — {brief.get('title', 'Дизайн-система и бриф дизайнера')}"[:250],
-               designer_body(brief), [designer_label])
+        ensure(
+            f"D0 — {brief.get('title', 'Дизайн-система и бриф дизайнера')}"[:250],
+            designer_body(brief),
+            [designer_label],
+        )
 
     cards_path.write_text(json.dumps(cards, ensure_ascii=False, indent=1) + "\n")
 
@@ -242,15 +245,24 @@ def main() -> int:
         ]
         lines += [f"- {item}" for item in roadmap.get("constraints") or []]
         for stage in stages:
-            lines += ["", f"## {stage['id'].upper()} — {stage.get('title', '')}"
-                          f"  ·  сложность {stage.get('complexity', '?')}/5"
-                          + ("  ·  необязательный" if stage.get("optional") else ""), "",
-                      str(stage.get("intent", "")).strip(), ""]
+            lines += [
+                "",
+                f"## {stage['id'].upper()} — {stage.get('title', '')}"
+                f"  ·  сложность {stage.get('complexity', '?')}/5"
+                + ("  ·  необязательный" if stage.get("optional") else ""),
+                "",
+                str(stage.get("intent", "")).strip(),
+                "",
+            ]
             for task in stage.get("tasks") or []:
-                lines += [f"### {task['id']} — {task.get('title', '')}",
-                          f"`{task.get('size')}` · сложность {task.get('difficulty')}/5 · "
-                          f"роли: {', '.join(task.get('roles') or [])}", "",
-                          str(task.get("goal", "")).strip(), ""]
+                lines += [
+                    f"### {task['id']} — {task.get('title', '')}",
+                    f"`{task.get('size')}` · сложность {task.get('difficulty')}/5 · "
+                    f"роли: {', '.join(task.get('roles') or [])}",
+                    "",
+                    str(task.get("goal", "")).strip(),
+                    "",
+                ]
                 if task.get("scope"):
                     lines += ["В объёме:", *[f"- {i}" for i in task["scope"]], ""]
                 if task.get("out_of_scope"):
@@ -261,18 +273,23 @@ def main() -> int:
                     lines += [f"Зависит от: {', '.join(task['depends_on'])}", ""]
         brief = roadmap.get("designer_brief") or {}
         if brief:
-            lines += ["", f"## D0 — {brief.get('title', 'Бриф дизайнера')}", "",
-                      str(brief.get("goal", "")).strip(), ""]
+            lines += ["", f"## D0 — {brief.get('title', 'Бриф дизайнера')}", "", str(brief.get("goal", "")).strip(), ""]
             lines += [f"- [ ] {item}" for item in brief.get("must_cover") or []]
-        Path(os.path.expanduser(args.markdown)).write_text(
-            "\n".join(lines) + "\n", encoding="utf-8")
+        Path(os.path.expanduser(args.markdown)).write_text("\n".join(lines) + "\n", encoding="utf-8")
 
     result = {
         "project": args.project,
-        "board": {"title": args.board_title, "project_id": project_id,
-                  "view_id": kanban["id"], "url": board.base.replace("/api/v1", "")},
-        "created": created, "updated": updated, "skipped": skipped,
-        "cards": len(cards), "stages": len(stages),
+        "board": {
+            "title": args.board_title,
+            "project_id": project_id,
+            "view_id": kanban["id"],
+            "url": board.base.replace("/api/v1", ""),
+        },
+        "created": created,
+        "updated": updated,
+        "skipped": skipped,
+        "cards": len(cards),
+        "stages": len(stages),
     }
     print(json.dumps(result, ensure_ascii=False, indent=1))
     return 0

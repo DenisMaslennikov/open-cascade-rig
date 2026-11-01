@@ -16,6 +16,7 @@
 CLI: python3 validate_plan.py plan.json [--repo /path/to/repo]
 Exit code 0 — план валиден, 1 — есть ошибки (печатаются в stderr).
 """
+
 from __future__ import annotations
 
 import json
@@ -24,14 +25,14 @@ import sys
 
 TESTS_PREFIXES = ("tests/", "test/")
 SRC_PREFIXES = ("src/", "app/", "lib/", "pkg/")
-CONTOUR_PREFIXES = ("backend/", "frontend/")   # монорепо: контур перед src/tests
+CONTOUR_PREFIXES = ("backend/", "frontend/")  # монорепо: контур перед src/tests
 
 
 def classify(path: str) -> str:
     """Отбрасывает префикс контура, чтобы src/ и tests/ распознавались в монорепо."""
     for prefix in CONTOUR_PREFIXES:
         if path.startswith(prefix):
-            return path[len(prefix):]
+            return path[len(prefix) :]
     return path
 
 
@@ -75,6 +76,7 @@ def validate_schema(node, schema, path="plan") -> list[str]:
             errs.append(f"{path}: длиннее {schema['maxLength']} символов")
         if "pattern" in schema:
             import re
+
             if not re.match(schema["pattern"], node):
                 errs.append(f"{path}: не соответствует шаблону {schema['pattern']}")
     return errs
@@ -155,8 +157,10 @@ def main() -> int:
         has_tests = any(classify(f).startswith(TESTS_PREFIXES) for f in files)
         has_src = any(classify(f).startswith(SRC_PREFIXES) for f in files)
         if has_tests and has_src:
-            errors.append(f"{s['id']}: файлы тестов и исходников в одной подзадаче — "
-                          f"нарушает разделение «тесты пишет не тот, кто код»")
+            errors.append(
+                f"{s['id']}: файлы тестов и исходников в одной подзадаче — "
+                f"нарушает разделение «тесты пишет не тот, кто код»"
+            )
         if not has_tests and not has_src and not files:
             errors.append(f"{s['id']}: files_allowed пуст")
         if repo:
@@ -167,7 +171,7 @@ def main() -> int:
 
     # пересечение файлов у независимых подзадач
     for i, a in enumerate(subs):
-        for b in subs[i + 1:]:
+        for b in subs[i + 1 :]:
             if b["id"] in ancestry(nodes, a["id"]) or a["id"] in ancestry(nodes, b["id"]):
                 continue
             inter = set(a["files_allowed"]) & set(b["files_allowed"])
@@ -180,8 +184,10 @@ def main() -> int:
     if errors:
         print("\n".join("ERROR: " + e for e in errors), file=sys.stderr)
         return 1
-    print(f"OK: план '{plan['task']['id']}' валиден, подзадач: {len(subs)}, "
-          f"файлов: {len({f for s in subs for f in s['files_allowed']})}")
+    print(
+        f"OK: план '{plan['task']['id']}' валиден, подзадач: {len(subs)}, "
+        f"файлов: {len({f for s in subs for f in s['files_allowed']})}"
+    )
     return 0
 
 

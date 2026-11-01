@@ -17,6 +17,7 @@ Usage:
 
 Output: JSON в stdout, ошибки в stderr. Exit 0 — ок, 1 — сбой.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -61,8 +62,7 @@ def view_map(b) -> dict[int, tuple[str, dict]]:
     """
     out: dict[int, tuple[str, dict]] = {}
     for page in range(1, 20):
-        _, buckets = b._call(
-            "GET", f"/projects/{b.project_id}/views/{b.view_id}/tasks?per_page=200&page={page}")
+        _, buckets = b._call("GET", f"/projects/{b.project_id}/views/{b.view_id}/tasks?per_page=200&page={page}")
         fresh = 0
         for bucket in buckets:
             for task in bucket.get("tasks") or []:
@@ -114,15 +114,20 @@ def main() -> int:
         per_column: dict[str, int] = {t: 0 for t in columns}
         for column, _task in on_board.values():
             per_column[column] = per_column.get(column, 0) + 1
-        print(json.dumps({
-            "project": args.project,
-            "columns": per_column,
-            "cards_total": len(tasks),
-            "on_board": len(on_board),
-            "orphans": len(orphans),
-            "orphan_ids": orphans[:20],
-            "done": sum(1 for t in tasks.values() if t.get("done")),
-        }, ensure_ascii=False))
+        print(
+            json.dumps(
+                {
+                    "project": args.project,
+                    "columns": per_column,
+                    "cards_total": len(tasks),
+                    "on_board": len(on_board),
+                    "orphans": len(orphans),
+                    "orphan_ids": orphans[:20],
+                    "done": sum(1 for t in tasks.values() if t.get("done")),
+                },
+                ensure_ascii=False,
+            )
+        )
         return 0
 
     report: dict = {"project": args.project, "dry_run": args.dry_run, "archived": [], "moved": []}
@@ -155,8 +160,9 @@ def main() -> int:
         fresh = {t["id"]: t for t in all_tasks(b)}
         report["verify"] = {
             "done_on_board": sum(1 for tid, (col, t) in after.items() if t.get("done") and col != "Done"),
-            "archived_in_done": sum(1 for tid, (col, _t) in after.items()
-                                    if col == "Done" and fresh.get(tid, {}).get("done")),
+            "archived_in_done": sum(
+                1 for tid, (col, _t) in after.items() if col == "Done" and fresh.get(tid, {}).get("done")
+            ),
             "orphans_left": sorted(tid for tid in fresh if tid not in after),
         }
     print(json.dumps(report, ensure_ascii=False, indent=1))
