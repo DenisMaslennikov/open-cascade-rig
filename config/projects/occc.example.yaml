@@ -1,0 +1,30 @@
+# OpenCapsuleerCommandCenter (OCCC) — example project profile for the cascade.
+#
+# Copy it with `bin/config_init.py --materialize --project occc`, then edit the live copy. The live
+# file also carries `key_ref`, which names a variable in `~/.config/cascade/keys.env`; the key itself
+# never lives in a repository.
+#
+# Model choices as of 2026-11-01, with the reason each one holds:
+key_ref: LITELLM_KEY_OCCC
+base_url: http://litellm.service/v1
+ui: true
+
+models:
+  # Planning and test specifications: a reasoning model that can hold the whole schema in mind.
+  # Its output budget must stay open (`max_tokens: null`), otherwise reasoning eats the answer.
+  architect: ~z-ai/glm-latest
+  # Called by the human only, for architect-level arbitration: the strongest model available.
+  chief_architect: ~anthropic/claude-opus-latest
+  specifier: ~z-ai/glm-latest
+  # Screenshots are its working input, so it is the one role that must see images.
+  designer: ~anthropic/claude-sonnet-latest
+  # Writes code until the frozen tests pass: cheap, and observed to actually write and finish.
+  executor: ~z-ai/glm-flash-latest
+  # Disputes between reviewer and executor. Vendor must differ from both.
+  arbiter: moonshotai/kimi-k3.1-pro
+  # First line of review over a subtask diff: cheap, and a different vendor from the executor.
+  # Was ~deepseek/deepseek-v4-pro-latest until 2026-11-01 ($41.61/M input, agent runs $4-6 a round).
+  reviewer: minimax/minimax-m3.1-flash
+  # The pull request itself, read once by a stronger vendor with a longer timeout.
+  reviewer_final: qwen/qwen3.8-max-0902
+  vision: ~z-ai/glm-flash-latest
