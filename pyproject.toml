@@ -20,6 +20,7 @@ ignore = ["S101"]  # asserts are the point of a test
 # Debt, recorded rather than hidden. These scripts were written before the gate existed; the rules
 # above are the standard, and the ignores below are the exact places that do not meet it yet. Each
 # line names the class of finding it suppresses, so removing one is a measurable task.
+# Card #183 ("убрать записанный долг линта") owns their removal.
 "bin/**" = [
   "S603",  # subprocess with an argument list: the calls are ours (git, curl), not user input
   "S607",  # partial paths (git, curl, gh): resolved through PATH by design, see rig_conf
@@ -33,7 +34,7 @@ ignore = ["S101"]  # asserts are the point of a test
   "B007",  # an unused loop counter in the review loop, kept for its log line, cleaned by the card
 ]
 # A real defect found by this gate, not fixed here: the fix belongs to a card that the cascade runs
-# (AGENTS.md rule 10). Delete this line in the pull request that fixes `brief`.
+# (AGENTS.md rule 10). Card #182 owns it; delete this line in the pull request that fixes `brief`.
 "bin/schema_design.py" = ["F821", "B007", "E741"]
 
 [tool.pytest.ini_options]

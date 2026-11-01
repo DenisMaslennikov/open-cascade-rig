@@ -1,8 +1,8 @@
 rules:
   # The rule is ERROR everywhere the gate can enforce it today. The five scripts below still carry
   # function-level imports written before this gate existed; they are reported by the second rule at
-  # WARNING severity, so the debt stays visible in every run without turning main red. The card that
-  # hoists them deletes that second rule.
+  # WARNING severity, so the debt stays visible in every run without turning main red. Card #183
+  # hoists them and deletes that second rule.
   - id: no-local-imports-legacy
     languages: [python]
     message: >-
