@@ -4,7 +4,7 @@ When to read: before writing or editing tests, and before diagnosing a failing o
 
 ## Where and how
 
-- `tests/` at the repository root mirrors `bin/`: `bin/prices_openrouter.py` → `tests/test_prices_openrouter.py`.
+- `tests/` at the repository root mirrors `bin/`: `bin/rig/prices_openrouter.py` → `tests/test_prices_openrouter.py`.
 - No network, no real gateway, no real git remote in a unit test: subprocess and `urllib` are patched
   at the boundary. A test that needs the internet is an integration test and belongs in its own file.
 - A test name states the behaviour (`test_reports_direct_connection_when_no_proxy_is_configured`), not

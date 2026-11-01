@@ -34,7 +34,7 @@ Read this first, then only the files the task actually touches. Everything here 
    with options, never a workaround with an import inside a function.
 9. **No environment-specific defaults in code.** A gateway URL, a proxy, a hostname or a home path as
    a fallback works on one machine and hides that it was never configured. Project config → variable →
-   fail with an instruction. `bin/rig_conf.py` is the only resolver.
+   fail with an instruction. `bin/rig/rig_conf.py` is the only resolver.
 10. **The rig develops itself.** A change to `bin/`, `config/` or a gate becomes a card that the
    cascade executes; the orchestrator opens cards, arbitrates and merges. Hooks and CI wiring are the
    declared exception, written by the orchestrator with the debt recorded.

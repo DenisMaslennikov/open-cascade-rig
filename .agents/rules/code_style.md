@@ -28,7 +28,7 @@ When to read: before editing anything under `bin/`, `config/` or `tests/`.
 - Resolve in this order: the project config (`~/.config/cascade/projects/<slug>.yaml`), then an
   environment variable (or `keys.env`), then fail with an instruction naming what to set.
 - A missing proxy means *no proxy*, never a guessed one.
-- `bin/rig_conf.py` exists for this: use it instead of inventing another lookup.
+- `bin/rig/rig_conf.py` exists for this: use it instead of inventing another lookup.
 
 ## Imports
 

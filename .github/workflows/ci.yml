@@ -17,19 +17,19 @@ jobs:
       - run: pip install -q -r requirements-dev.txt
       - run: python -m ruff check .
       - run: python -m ruff format --check .
-      # The suite is being written card by card (see the tech-debt card); an empty tests/ must not
-      # turn a green pull request red before the first test exists.
+      # The suite lives under bin/ with the modules (card #191): `bin/tests`, run from `bin`, so the
+      # `rig` package resolves without a `pythonpath` setting.
       - name: Tests
         run: |
-          if [ -n "$(find tests -name 'test_*.py' 2>/dev/null)" ]; then
-            python -m pytest
+          if [ -n "$(find bin/tests -name 'test_*.py' 2>/dev/null)" ]; then
+            cd bin && python -m pytest
           else
             echo "no tests yet — the coverage card is still open"
           fi
       - name: Property tests
         run: |
-          if [ -n "$(find tests -name 'test_*.py' 2>/dev/null)" ]; then
-            python -m pytest -m property || echo "no property tests marked yet"
+          if [ -n "$(find bin/tests -name 'test_*.py' 2>/dev/null)" ]; then
+            cd bin && python -m pytest -m property || echo "no property tests marked yet"
           fi
 
   security:

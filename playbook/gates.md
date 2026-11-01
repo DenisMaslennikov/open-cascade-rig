@@ -3,7 +3,7 @@
 **When to read:** before freezing tests, before running the executor, and whenever a check is green
 for a reason you did not predict.
 
-The gates are deterministic (`bin/gate.py`) and answer four questions:
+The gates are deterministic (`bin/rig/gate.py`) and answer four questions:
 
 - `check-diff` — is every changed file inside the subtask's `files_allowed`?
 - `frozen-tests` — did the executor touch the tests it was supposed to make pass?
