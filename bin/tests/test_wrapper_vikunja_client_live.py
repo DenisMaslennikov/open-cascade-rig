@@ -9,13 +9,8 @@ Run it on the machine that hosts Vikunja:
 from __future__ import annotations
 
 import os
-import sys
-from pathlib import Path
 
 import pytest
-
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "tools" / "wrapper"))
-
 import vikunja_client as vk
 
 pytestmark = pytest.mark.skipif(not os.environ.get("VIKUNJA_URL"), reason="set VIKUNJA_URL to read a real board")
