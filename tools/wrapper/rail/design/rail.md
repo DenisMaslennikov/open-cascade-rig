@@ -21,7 +21,7 @@ Card 184, subtask 2. Artefact: `rail.html` (inline CSS and SVG, no JavaScript, d
 | `CardList` | Body of the Cards tab | `ul` of `CardRow` |
 | `CardRow` | In `CardList` | Board id `#184`, title (2 lines max, ellipsis), label chips, blocked marker, relative time. Click starts a Hermes session bound to the card |
 | `SessionList` | Body of the Sessions tab | `ul` of `SessionRow`, sorted by last message, newest first |
-| `SessionRow` | In `SessionList` | Unread dot slot, title, bound card id or `no card`, `running` or `Needs input`, `?` marker, relative time |
+| `SessionRow` | In `SessionList` | Unread dot slot, title, bound card (`card #172`) or `no card bound`, `running` or `Needs input`, `?` marker, relative time |
 | `RailFooter` | Bottom of the rail | Two upstream states, `board` and `dashboard`: dot, name, word |
 
 ## Tokens used (OCCC dark map, no new colours)
@@ -41,25 +41,26 @@ Card 184, subtask 2. Artefact: `rail.html` (inline CSS and SVG, no JavaScript, d
 | `colorWarning` | `#e8a33d` | Waiting marker and bar, blocked word, degraded upstream dot |
 | `colorDanger` | `#e5534b` | Unreachable upstream dot, error notice bar and icon |
 | `colorText` | `#e6edf7` | Titles, active labels |
-| `colorTextSecondary` | `#93a1b5` | Ids, inactive tabs, footer words |
-| `colorTextMuted` | `#6b7686` | Relative times, sub-lines, captions |
+| `colorTextSecondary` | `#93a1b5` | Row metadata (board id, bound card, relative time), inactive tab, footer words |
+| `colorTextMuted` | `#6b7686` | Captions and the workspace placeholder only; nothing the owner must act on |
 | `colorBorder` | `#273140` | Outlines, language switch, notice |
 | `colorSplit` | `rgba(230, 237, 247, 0.08)` | Row and section separators |
 
 Tokens to add: none. Label chips take their hex from Vikunja at runtime (the sketch uses `#5b8ff9`, `#3fbf6f`, `#e8a33d` only as samples). The chip text always stays `colorText`; the label colour is only the border and the dot, so any hex stays legible.
 
-Non-colour values reused: `radiusSm` 4, `radiusMd` 8, `spaceXs` 8, `spaceSm` 12, `fontSizeSm` 12, `fontSizeMd` 14, `motionFast` 120 ms. Two sizes outside the scale are used on purpose: 13 px for row titles and 11 px for chips and sub-lines. Add `fontSizeXs` (11) only if the owner keeps them.
+Non-colour values reused: `radiusSm` 4, `radiusMd` 8, `spaceXs` 8, `spaceSm` 12, `fontSizeSm` 12, `fontSizeMd` 14, `motionFast` 120 ms. Type scale: 12 px is the floor (row metadata, chips, blocked word, footer, counters), 13 px for row titles and tabs, 14 px for the active tab and brand. Nothing is below 12 px. Relative times are 12 px, `colorTextSecondary`, tabular figures, `white-space: nowrap`.
 
 ## States (each is a `data-state` block in the page)
 
 - `cards`: five cards. Two with chips, one blocked (`data-blocked="true"`, warning icon plus the word `Blocked`), one with a very long title cut after two lines.
-- `sessions`: five sessions, newest message first. Two unread, one waiting, three bound to a card. The fourth row carries `data-state="focus"`, which draws the 2 px `#5b8ff9` ring as keyboard focus does.
+- `sessions`: five sessions, newest message first (Sessions counter 5, Cards counter 0). Two unread, one waiting, four bound to a card (`card #172 · …` style sub-lines). The fourth row carries `data-state="focus"`, which draws the 2 px `#5b8ff9` ring as keyboard focus does.
 - `unread`: the header pill shows the total with a green dot, and a 3 px green strip on the top edge of the rail is the browser-tab style attention marker. The footer shows `dashboard 401` as a degraded upstream.
 - `waiting`: `data-waiting="true"` row with a `?` marker in a ring, the words `Needs input`, an elevated background and a 3 px left bar. Four cues, so colour is not the only one.
 - `empty`: no cards in Plan; icon, title and one sentence on what to do. Counters read 0.
 - `loading`: seven skeleton rows in the real row geometry, counters show a dash, footer says `connecting`. The pulse stops under `prefers-reduced-motion`.
 - `error`: `role="alert"` notice naming the failed upstream, saying that sessions keep running, with a `Retry` button. Both tabs stay clickable; the footer dot turns red with the word `unreachable`.
-- Row interaction states: default, hover (tint wash plus title to `colorPrimaryHover`), focus (ring), unread (title weight 600 plus dot plus brighter time), waiting, blocked. Active tab: weight 600, 2 px underline, brighter counter.
+- Row interaction states: default, hover (tint wash plus title to `colorPrimaryHover`), focus (ring), unread (title weight 600 plus dot plus brighter time), waiting, blocked. Active tab: `data-active="true"`, weight 600, 14 px, 3 px `#5b8ff9` underline, `colorPrimaryTint` wash, counter in `colorText` on a `colorPrimary` pill; the inactive tab is 13 px weight 400 `colorTextSecondary`.
+- Counter contract: every tab button carries `data-count="N"`, N being the number of rows of that type rendered in the same state block (0 for empty, loading and error, and for the tab of the other type). The visible counter shows the same N. The keyboard-focus sample row uses `data-focus="true"`, so `data-state` stays reserved for the seven state blocks.
 
 ## Accessibility
 
@@ -67,7 +68,7 @@ Non-colour values reused: `radiusSm` 4, `radiusMd` 8, `spaceXs` 8, `spaceSm` 12,
 - Focus ring: 2 px `#5b8ff9`, drawn inside the element (`outline-offset: -2px`) so the rail's `overflow: hidden` never clips it.
 - Unread has a text alternative (`aria-label` on the dot) and a bolder title, not only a green dot. Waiting has the `?` marker, the words and a left bar. Blocked has an icon and a word.
 - The error notice is `role="alert"`; the attention strip is `role="status"`; the loading list is `aria-busy` and the skeleton rows are `aria-hidden`.
-- Muted text (`#6b7686`) is used only for non-essential metadata: times and captions. Anything the owner must act on uses secondary or primary text.
+- Muted text (`#6b7686`) is used only for captions with no actionable information, never below 12 px. Anything the owner must act on uses secondary or primary text.
 - Times never wrap (`white-space: nowrap`) and use tabular figures; counters do the same.
 - Russian text is longer: titles clamp, the project slug ellipsises, and the footer wraps onto a second line instead of overflowing.
 
@@ -84,7 +85,9 @@ Non-colour values reused: `radiusSm` 4, `radiusMd` 8, `spaceXs` 8, `spaceSm` 12,
 | `rail.counter.running` | Running sessions | Запущенных сессий |
 | `rail.unread` | {n} unread | {n} непрочитанных (plural forms one/few/many) |
 | `rail.card.blocked` | Blocked | Заблокирована |
-| `rail.session.noCard` | no card | без карточки |
+| `rail.session.card` | card #{id} | карточка #{id} |
+| `rail.session.noCard` | no card bound | без карточки |
+| `rail.session.idle` | idle | простаивает |
 | `rail.session.running` | running | работает |
 | `rail.session.needsInput` | Needs input | Нужен ответ |
 | `rail.session.unreadLabel` | Unread messages | Есть непрочитанные сообщения |
