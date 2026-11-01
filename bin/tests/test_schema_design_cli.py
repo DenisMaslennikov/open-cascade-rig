@@ -13,7 +13,7 @@ import sys
 
 import pytest
 
-from src import schema_design
+from rig import schema_design
 
 # What a successful `generate` returns; empty on purpose, the branch under test is the call itself.
 EMPTY_SCHEMA = {
