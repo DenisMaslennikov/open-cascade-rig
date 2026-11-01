@@ -302,9 +302,7 @@ def test_every_card_of_the_board_becomes_one_view_that_keeps_its_labels_and_url(
 
     assert [view.id for view in views] == [184 + index for index in range(len(cards))]
     assert [view.title for view in views] == [title for title, _ in cards]
-    assert [view.labels for view in views] == [
-        tuple((name, colour) for name, colour in labels) for _, labels in cards
-    ]
+    assert [view.labels for view in views] == [tuple((name, colour) for name, colour in labels) for _, labels in cards]
     assert [view.url for view in views] == [
         f"{BOARD_WEB}/projects/{PROJECT_ID}/tasks/{184 + index}" for index in range(len(cards))
     ]
@@ -391,9 +389,7 @@ def test_build_server_returns_a_server_that_is_not_started_yet(static_dir: Path,
     assert server.url is None
 
 
-def test_build_server_raises_file_not_found_for_a_missing_static_directory(
-    tmp_path: Path, store_path: Path
-) -> None:
+def test_build_server_raises_file_not_found_for_a_missing_static_directory(tmp_path: Path, store_path: Path) -> None:
     missing = tmp_path / "absent"
 
     with pytest.raises(FileNotFoundError) as raised:
@@ -466,9 +462,7 @@ def test_the_cli_rejects_a_missing_required_option(
     assert missing in capsys.readouterr().err
 
 
-def test_the_cli_rejects_a_port_that_is_not_an_integer(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
+def test_the_cli_rejects_a_port_that_is_not_an_integer(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     argv = cli_argv(tmp_path / "static", tmp_path / "state.db", port="http")
 
     with pytest.raises(SystemExit) as raised:
