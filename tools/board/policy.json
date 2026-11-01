@@ -5,6 +5,6 @@
  "plan_column": "Plan",
  "review_column": "Review",
  "done_column": "Done",
- "max_plan": 2,
+ "max_plan": null,
  "max_prs": 100
 }
