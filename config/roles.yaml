@@ -1,0 +1,65 @@
+# Каркас ролей каскада. Здесь НЕТ моделей: они задаются при создании проекта
+# в ~/.config/cascade/projects/<slug>.yaml (секция models:).
+# Здесь только общее для всех проектов: шлюз, параметры сэмплинга, лимиты.
+# max_tokens: null = лимита нет (модель отвечает до своего потолка). Поставь число, чтобы ограничить
+# выход роли: лимит живёт в конфиге, а не зашит в скрипт.
+# key_ref — ИМЯ переменной в keys.env, не сам ключ.
+
+gateway:
+  base_url: "http://litellm.service/v1"
+  key_ref: "LITELLM_KEY"
+  timeout_seconds: 300
+
+roles:
+  architect:
+    temperature: 0.2
+    max_tokens: null
+  chief_architect:
+    temperature: 0.2
+    max_tokens: null
+    # роадмап, конкретные файлы); выход: свободный текст — решение, альтернативы, риски.
+    # Роль вызывается ЧЕЛОВЕКОМ, не в фазе конвейера. Модель — сильнейшая доступная.
+  specifier:
+    temperature: 0.1
+    max_tokens: null
+  designer:
+    temperature: 0.3
+    max_tokens: null
+    # вход: спецификация UI-фичи + токены темы; выход: design spec
+    # (сетка, состояния, состав компонентов, правки токенов), кода не пишет
+  executor:
+    temperature: 0.1
+    max_tokens: null
+  arbiter:
+    temperature: 0.0
+    max_tokens: null
+    max_input_tokens: 60000   # единственная роль с лимитом входа: kimi отвечает ~32 c на 1M
+
+    # вход: пакет спора; выход: {winner, rationale, action, confidence}
+  reviewer:
+    temperature: 0.0
+    max_tokens: null
+    tool: "pr-agent"
+    # вход: plain-diff подзадачи; выход: отчёт ревью. Дешёвый вендор — на каждый малый diff.
+  reviewer_final:
+    temperature: 0.0
+    max_tokens: null
+    tool: "pr-agent"
+    # вход: готовый PR; выход: отчёт ревью + «что проверить человеку».
+    # Сильнее и медленнее предыдущего: ждать долго (pr_review.py --final --timeout 3600),
+    # проверять живость через --status, не резать таймаут «чтобы быстрее».
+  vision:
+    temperature: 0.0
+    max_tokens: null
+budgets:
+  per_task_total: null        # считаем по usage x цены /model/info, пока без лимита
+  attempts_per_subtask: 4
+  arbiter_max_calls: 2
+  wall_clock_minutes_per_phase: 45
+
+# Правила выбора моделей при создании проекта (значения задаёт человек):
+# 1. вендор арбитра ≠ вендор спецификатора и ≠ вендор исполнителя;
+# 2. исполнитель — самая дешёвая модель, которая реально проходит тесты;
+# 3. reviewer — вендор, отличный от арбитра;
+# 4. пустая модель у любой роли = проект не сконфигурирован
+#    (проверка: python3 ~/.config/cascade/bin/check_project.py <slug>).

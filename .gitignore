@@ -1,0 +1,14 @@
+# Runtime state and secrets never enter the repository.
+state/
+logs/
+*.log
+*.env
+keys.env
+.env
+*.tar.gz
+mutants/
+.mutmut-cache/
+__pycache__/
+*.pyc
+.venv/
+node_modules/
