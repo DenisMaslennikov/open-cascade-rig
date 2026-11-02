@@ -49,10 +49,12 @@ Hooks are versioned: `git config core.hooksPath .githooks` once per clone (the p
 to commit a staged file that also has unstaged edits, because the formatter would take them).
 
 ```bash
+# Scripts are a package (`bin/rig`) and are run from `bin`: python3 -m rig.<tool>. The package is
+# called `rig`, not `src`, because mutmut 3.8 reserves the `src.` prefix for itself (stats.py asserts).
 python3 -m ruff check . && python3 -m ruff format --check .   # or: make lint / make fmt
-python3 -m pytest                                            # or: make test
-python3 -m pytest -m property                                # or: make property
-python3 -m mutmut run --paths-to-mutate=bin/<module>.py      # or: make mutation MUTATE=bin/<module>.py
+cd bin && python3 -m pytest                                  # or: make test
+cd bin && python3 -m pytest -m property                      # or: make property
+cd bin && python3 -m mutmut run "rig.<module>.x_*"           # or: make mutation MUTATE=bin/rig/<module>.py
 semgrep --config .semgrep.yml --severity ERROR --error       # the environment-defaults rule lives here
 gitleaks detect --no-git --redact --source .                 # secrets, seconds
 ```

@@ -4,7 +4,8 @@ When to read: before writing or editing tests, and before diagnosing a failing o
 
 ## Where and how
 
-- `tests/` at the repository root mirrors `bin/`: `bin/rig/prices_openrouter.py` → `tests/test_prices_openrouter.py`.
+- `bin/tests/` mirrors `bin/rig/`: `bin/rig/prices_openrouter.py` → `bin/tests/test_prices_openrouter.py`.
+  The suite lives with the modules; it is run from `bin` (`cd bin && python3 -m pytest`).
 - No network, no real gateway, no real git remote in a unit test: subprocess and `urllib` are patched
   at the boundary. A test that needs the internet is an integration test and belongs in its own file.
 - A test name states the behaviour (`test_reports_direct_connection_when_no_proxy_is_configured`), not
@@ -33,8 +34,10 @@ fast-check and no Stryker.
 
 ## Mutation
 
-- `make mutation MUTATE=bin/<module>.py` after a change to that module. A surviving mutant is either a
-  missing assertion or code that does not matter — decide which, and write it in the pull request.
+- `make mutation MUTATE=bin/rig/<module>.py` after a change to that module (it runs
+  `cd bin && python3 -m mutmut run "<module-glob>"`). A surviving mutant is either a missing
+  assertion or code that does not matter — decide which, and write it in the pull request. Surviving
+  mutants are the normal state of a thin suite: they count mutation points, not tests.
 - A whole-repository mutation run is minutes of CPU for a signal nobody reads; it is not a gate.
 
 ## Prohibitions
