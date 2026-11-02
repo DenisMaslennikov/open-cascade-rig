@@ -29,7 +29,7 @@ import shutil
 import sys
 from pathlib import Path
 
-from rig_conf import RIG_ENV, rig_repo
+from .rig_conf import RIG_ENV, rig_repo
 
 LIVE = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "cascade"
 

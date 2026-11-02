@@ -13,10 +13,7 @@ import sys
 from pathlib import Path
 
 import pytest
-
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "bin"))
-
-import schema_design
+from rig import schema_design
 
 # What a successful `generate` returns; empty on purpose, the branch under test is the call itself.
 EMPTY_SCHEMA = {

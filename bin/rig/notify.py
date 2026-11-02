@@ -21,7 +21,7 @@ import subprocess
 import sys
 import urllib.parse
 
-from rig_conf import TELEGRAM_PROXY_ENV, proxy
+from .rig_conf import TELEGRAM_PROXY_ENV, proxy
 
 ENV = os.path.expanduser("~/.hermes/.env")
 PROXY = proxy(TELEGRAM_PROXY_ENV)  # None means: connect directly

@@ -13,7 +13,7 @@ same blind spot.
 ## Procedure
 
 ```
-bin/review_fix_loop.py --project <slug> --plan plan.json --subtask <id> --worktree <wt> \
+cd bin && python3 -m rig.review_fix_loop --project <slug> --plan plan.json --subtask <id> --worktree <wt> \
   --engine pr|agent [--role reviewer|reviewer_final] [--max-rounds 3] [--fix-model <flash>] [--notify]
 ```
 
@@ -38,5 +38,5 @@ bin/review_fix_loop.py --project <slug> --plan plan.json --subtask <id> --worktr
 
 Reviews are the most expensive part of the loop when done by an agent: each turn resends the whole
 conversation, so a review of one four-file diff cost ~544k input tokens across 15 calls, against ~8k
-tokens for the same diff through pr-agent. Price those tokens with `bin/prices_openrouter.py`; do not
+tokens for the same diff through pr-agent. Price those tokens with `bin/rig/prices_openrouter.py`; do not
 quote local gateway prices, which are 30-70x the list price. See `costs.md`.

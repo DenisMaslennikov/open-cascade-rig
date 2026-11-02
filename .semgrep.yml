@@ -3,6 +3,9 @@ rules:
   # function-level imports written before this gate existed; they are reported by the second rule at
   # WARNING severity, so the debt stays visible in every run without turning main red. Card #183
   # hoists them and deletes that second rule.
+  # The paths are repository paths, so a file move has to move them too: when `bin/*.py` became
+  # `bin/rig/*.py` (card #191) these five lines kept pointing at files that no longer existed, and CI
+  # turned red on debt that was already known.
   - id: no-local-imports-legacy
     languages: [python]
     message: >-
@@ -18,11 +21,11 @@ rules:
           - pattern: from $M import $X
     paths:
       include:
-        - "bin/pr_review.py"
-        - "bin/run_role.py"
-        - "bin/run_subtask.py"
-        - "bin/specify_task.py"
-        - "bin/validate_plan.py"
+        - "bin/rig/pr_review.py"
+        - "bin/rig/run_role.py"
+        - "bin/rig/run_subtask.py"
+        - "bin/rig/specify_task.py"
+        - "bin/rig/validate_plan.py"
 
   - id: no-local-imports
     languages: [python]
@@ -43,11 +46,11 @@ rules:
         - "tests/**"
         - "bin/**"
       exclude:
-        - "bin/pr_review.py"
-        - "bin/run_role.py"
-        - "bin/run_subtask.py"
-        - "bin/specify_task.py"
-        - "bin/validate_plan.py"
+        - "bin/rig/pr_review.py"
+        - "bin/rig/run_role.py"
+        - "bin/rig/run_subtask.py"
+        - "bin/rig/specify_task.py"
+        - "bin/rig/validate_plan.py"
 
   - id: no-bare-noqa
     languages: [python]

@@ -33,12 +33,7 @@ import time
 from datetime import UTC, datetime
 from pathlib import Path
 
-from rig_conf import gateway
-
-BIN = Path(__file__).resolve().parent
-sys.path.insert(0, str(BIN))
-
-from plan_task import (  # noqa: E402
+from .plan_task import (
     CONFIG,
     STATE,
     call_model_stream,
@@ -48,6 +43,9 @@ from plan_task import (  # noqa: E402
     repo_map,
     token_limit,
 )
+from .rig_conf import gateway
+
+BIN = Path(__file__).resolve().parent
 
 SYSTEM_PROMPT = """You are the designer of an automated development pipeline.
 
