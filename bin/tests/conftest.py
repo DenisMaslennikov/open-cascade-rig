@@ -22,7 +22,11 @@ def _repository_root() -> Path:
 
 REPO_ROOT = _repository_root()
 
+# Two import forms, both live: `bin/tests/test_wrapper_vikunja_client.py` imports `vikunja_client`
+# flat, and the rail modules import each other as `tools.wrapper.<module>` (a namespace package, so
+# the repository root must be importable). The suite runs from `bin`, where neither is on the path.
 sys.path.insert(0, str(REPO_ROOT / "tools" / "wrapper"))
+sys.path.insert(0, str(REPO_ROOT))
 
 
 @pytest.fixture(scope="session")
