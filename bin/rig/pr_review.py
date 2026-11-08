@@ -31,8 +31,8 @@ from .rig_conf import gateway, project_config
 
 BIN = Path(__file__).resolve().parent
 
-VENV = Path.home() / ".hermes" / "cache" / "scratch" / "pragent-venv"
-PR_AGENT = VENV / "bin" / "pr-agent"
+REVIEW_BINARY_ENV = "CASCADE_REVIEW_BINARY"
+SETUP_TOOL = "setup_pr_agent.py"
 DATA_FILES = ("docs/schema/schema.json", "docs/schema/schema.dbml")
 HUMAN_SECTION_HINT = (
     "After the findings, add a section titled exactly «Что проверить человеку» with 3 to 5 "
@@ -50,6 +50,31 @@ def key_of(slug: str) -> str:
     if not value:
         raise SystemExit(f"ERROR: {ref} is missing from {CONFIG / 'keys.env'}")
     return value
+
+
+def pr_agent_binary(slug: str) -> Path:
+    """The reviewer binary for `slug`: project config `reviewer_binary`, then $CASCADE_REVIEW_BINARY.
+
+    The first source that names a path owns the answer: a configured path that does not exist is an
+    error naming that path, never a silent fall-through to the next source. With nothing configured
+    the error tells the operator which key, which project and which tool fix it.
+    """
+    configured = project_config(slug).get("_", {}).get("reviewer_binary")
+    if configured:
+        return _existing_binary(Path(configured).expanduser(), f"reviewer_binary for {slug}")
+    from_env = os.environ.get(REVIEW_BINARY_ENV)
+    if from_env:
+        return _existing_binary(Path(from_env).expanduser(), REVIEW_BINARY_ENV)
+    raise SystemExit(
+        f"ERROR: no reviewer binary for {slug}. Set `reviewer_binary:` in {CONFIG}/projects/{slug}.yaml "
+        f"(or export {REVIEW_BINARY_ENV}); bin/{SETUP_TOOL} creates one."
+    )
+
+
+def _existing_binary(path: Path, source: str) -> Path:
+    if not path.exists():
+        raise SystemExit(f"ERROR: {source} points at {path}, which does not exist")
+    return path
 
 
 def reviewer_model(slug: str, override: str | None, final: bool = False) -> str:
@@ -315,7 +340,21 @@ def main() -> int:
         + "\n",
         encoding="utf-8",
     )
-    cmd = [str(PR_AGENT), f"--diff-file={diff_path}", f"--output={review_md}", f"--json-output={review_json}", "review"]
+
+    def close_record(patch: dict) -> None:
+        current = json.loads(record_path.read_text(encoding="utf-8"))
+        current.update(patch)
+        record_path.write_text(json.dumps(current, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
+
+    # The binary comes from configuration and may be gone (a pruned cache); that is an operator
+    # error, not a traceback: the run record keeps the reason and the failure is an exit code.
+    try:
+        binary = pr_agent_binary(args.project)
+    except SystemExit as exc:
+        close_record({"finished": True, "exit": 1, "error": str(exc)})
+        print(str(exc), file=sys.stderr)
+        return 1
+    cmd = [str(binary), f"--diff-file={diff_path}", f"--output={review_md}", f"--json-output={review_json}", "review"]
     # The reviewer's answer is validated against pr-agent's review schema; a free-form instruction
     # with a colon is parsed by dynaconf as a nested setting and the answer stops validating.
     # The human-facing section is asked for afterwards, from the finished review text.
@@ -325,9 +364,7 @@ def main() -> int:
     # stream the log so the run is observable while the model is thinking
     with open(log_path, "w", encoding="utf-8") as log:
         proc = subprocess.Popen(cmd, stdout=log, stderr=subprocess.STDOUT, text=True, env=env, cwd=repo)
-        current = json.loads(record_path.read_text(encoding="utf-8"))
-        current["pid"] = proc.pid
-        record_path.write_text(json.dumps(current, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
+        close_record({"pid": proc.pid})
         try:
             proc.wait(timeout=wait_seconds)
         except subprocess.TimeoutExpired:

@@ -13,6 +13,7 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
 from rig import setup_pr_agent
 
 
@@ -30,8 +31,8 @@ def _run(*args: str) -> subprocess.CompletedProcess[str]:
     )
 
 
-def _fake_venv(root: Path, version: str = "pr-agent 0.0") -> Path:
-    binary = root / "venv" / "bin" / "pr-agent"
+def _fake_venv(root: Path, version: str = "pr-agent 0.0", name: str = "venv") -> Path:
+    binary = root / name / "bin" / "pr-agent"
     binary.parent.mkdir(parents=True)
     binary.write_text(f"#!/bin/sh\necho '{version}'\n", encoding="utf-8")
     binary.chmod(0o755)
@@ -66,13 +67,18 @@ def test_an_existing_reviewer_is_reported_present_and_left_untouched(tmp_path):
     assert _snapshot(venv) == before
 
 
-def test_the_reported_binary_is_the_configured_path_not_a_hermes_cache_path(tmp_path):
-    binary = _fake_venv(tmp_path)
-    venv = tmp_path / "venv"
+@pytest.mark.parametrize("venv_name", ["reviewer-venv", "another-reviewer"])
+def test_the_reported_binary_is_the_one_under_the_venv_that_was_passed(tmp_path, venv_name):
+    """The path comes from `--venv`, not from a location the tool picked for itself.
+
+    Two differently named venvs, neither of them the default, so a path the module invented
+    cannot match by accident: the reported binary is exactly `<venv>/bin/pr-agent`, resolved.
+    """
+    venv = tmp_path / venv_name
+    _fake_venv(tmp_path, name=venv_name)
 
     proc = _run("--venv", str(venv), "--json")
 
     assert proc.returncode == 0, proc.stderr
     payload = json.loads(proc.stdout)
-    assert payload["binary"] == str(binary.resolve())
-    assert ".hermes/cache" not in payload["binary"]
+    assert payload["binary"] == str((venv / "bin" / "pr-agent").resolve())
