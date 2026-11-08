@@ -171,19 +171,13 @@ def build_user_message(subtask: dict, repo_doc: str, test_rules: str, plan_tests
     )
 
 
-def test_directories(allowed: list[str]) -> set[str]:
-    """Where a subtask's unit tests live: the feature's own `tests/` directory.
-
-    A feature folder is the top level of the path the source sits in — `tools/wrapper/rail_db.py` ->
-    `tools/wrapper/tests/`, `bin/rig/gate.py` -> `bin/tests/` — so the suite travels with the feature
-    instead of being derived from a file name. Nothing here compares names: what is covered is a
-    question for `coverage`, not for a string match.
-    """
-    return {Path(path).parts[0] for path in allowed if path.endswith(".py") and len(Path(path).parts) > 1}
-
-
 def is_unit_test_path(path: str) -> bool:
-    """`<feature>/tests[/…]/test_*.py` — a unit test in the feature's own folder, nothing else."""
+    """`<feature>/tests[/…]/test_*.py` — a unit test under a `tests` directory, nothing else.
+
+    The path itself is not compared with any source path: when the plan froze the test files, those
+    paths are the rule; this check only keeps a non-test path (a module beside its own tests, a doc)
+    out of the `test` kind.
+    """
     parts = Path(path).parts
     return "tests" in parts[:-1] and parts[-1].startswith("test_") and parts[-1].endswith(".py")
 
@@ -194,7 +188,6 @@ def write_files(
     errors: list[str] = []
     normalized = [a.rstrip("/") for a in allowed]
     frozen = set(plan_tests or ())
-    features = test_directories(allowed)
     for item in files:
         path = (item.get("path") or "").strip()
         kind = item.get("kind")
@@ -214,9 +207,6 @@ def write_files(
                 continue
             if frozen and path not in frozen:
                 errors.append(f"{path}: the plan froze no such test file; expected one of {sorted(frozen)}")
-                continue
-            if not frozen and Path(path).parts[0] not in features:
-                errors.append(f"{path}: a test lives in the feature's own tests/ directory, next to {sorted(features)}")
                 continue
             inside = True
         if not inside:

@@ -6,20 +6,20 @@ directory that `bin` put on `sys.path`. After the move both crashed the moment t
 them, and no test noticed: the whole runner sat outside the suite's reach.
 
 An import is the cheapest possible contract, and it is the one the move broke, so it is the one pinned
-here: import every module in `bin/rig/`, one test case each, so the failure names the file.
+here. The list comes from the package itself (`pkgutil`), not from a directory listing of file names:
+a new module is covered without editing this file, and a renamed one leaves no stale entry behind.
 """
 
 from __future__ import annotations
 
 import importlib
+import pkgutil
 from pathlib import Path
 
 import pytest
+import rig
 
-RIG_DIR = Path(__file__).resolve().parents[1] / "rig"
-MODULES = sorted(
-    path.stem for path in RIG_DIR.glob("*.py") if path.stem != "__init__" and not path.stem.startswith("_")
-)
+MODULES = sorted(info.name for info in pkgutil.iter_modules(rig.__path__) if not info.name.startswith("_"))
 
 # Four modules import the board adapter, which lives in `~/soft/vikunja/board.py` — a library that is
 # not in this repository and therefore not on CI. They import it at module level on purpose (the code

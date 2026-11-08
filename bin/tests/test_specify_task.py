@@ -75,16 +75,15 @@ def test_a_frozen_test_named_by_the_plan_is_accepted(tmp_path: Path):
     assert ok, errors
 
 
-def test_a_mirrored_tests_unit_copy_is_rejected(tmp_path: Path):
-    """A `tests/unit/...` mirror belongs to no feature and is a second home nobody runs."""
+def test_without_a_frozen_list_any_tests_path_is_the_plans_choice(tmp_path: Path):
+    """The plan owns the test paths; the gate does not compare them with source paths."""
     ok, errors = write(
         tmp_path,
-        [{"path": "tests/unit/test_rail_db.py", "kind": "test", "content": TEST}],
+        [{"path": "tools/wrapper/tests/test_rail_db.py", "kind": "test", "content": TEST}],
         ["tools/wrapper/rail_db.py"],
     )
 
-    assert not ok
-    assert any("feature's own tests/ directory" in error for error in errors)
+    assert ok, errors
 
 
 def test_a_test_file_the_plan_did_not_freeze_is_rejected(tmp_path: Path):
