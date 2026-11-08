@@ -25,26 +25,41 @@ and is written by the orchestrator with a card recording the debt.
 
 ## Tech debt
 
-Debt is not accumulated. A gap or a defect found while doing a task is **fixed in that task** if it can
-be fixed there — same card, same pull request, same review. Finding a problem and writing it down for
-"later" is the expensive option, not the safe one: the next reader pays again, and the branch that
-would have carried the fix is already merged.
+Debt is not accumulated. A defect found while doing a task is fixed **right here, right now** — same
+card, same pull request, same review — whenever the fix does not need a large-scale change: a broken
+path, a missing gate, a false failure of a script. Such a fix is made immediately, in the branch that
+is open, without asking. Finding a problem and writing it down for "later" is the expensive option, not
+the safe one: the next reader pays again, and the branch that would have carried the fix is already
+merged.
 
-Ask the human, before finishing the task, when the fix cannot live in it:
+Ask the human, before finishing the task, when the fix cannot live in the current task — above all when
+it would touch many files, because a change that spreads across the repository is no longer "here and
+now"; also when it changes a contract, a schema or a rule another task depends on, or needs a decision
+the task does not own. The ask proposes the card and states what the defect is, why it cannot be fixed
+inside the current task, the options with a recommendation first, and what happens if it is left alone.
+Send the ask where an answer can actually arrive — the chat, and Telegram when someone is there to read
+it; a question nobody will read is a question not asked, so when the channel cannot answer, ask in the
+chat only.
 
-- it changes a contract, a schema or a rule another task depends on;
-- it needs a decision the task does not own (a library, an architecture, a vendor boundary);
-- it is larger than the task's budget of attempts or time.
-
-The ask states the problem, the options with a recommendation first, and what happens if it is left
-alone. Do not invent a card to avoid asking, and do not silently defer: a card is the record of a
-decision the human made, not a licence to leave work undone.
+A card is created **only with the human's permission**. Writing a card to avoid work is the failure
+mode, and so is silently dropping the finding: a card is the record of a decision the human made, not a
+licence to leave work undone.
 
 When debt is deliberately deferred by that decision, it must be visible, not silent:
 
 - the gate prints it (a `WARNING` rule, an ignore with the reason in the same line), and
 - the card that removes it is named where the suppression lives (`Card #NNN`), so deleting the
   suppression is a measurable task rather than a memory.
+
+Traps, and what they look like from outside:
+
+- a TODO or a follow-up card written instead of a fix — the defect ships, and the "later" card outlives
+  the memory of why it was opened;
+- a finding dropped without a decision — nobody decided anything, and the same defect re-surfaces on
+  the next branch;
+- a small fix waiting on a question — a one-line correction idles while a conversation could have been
+  skipped;
+- the ask sent into a channel that cannot answer — the task stalls on an answer that was never coming.
 
 ## Cards
 

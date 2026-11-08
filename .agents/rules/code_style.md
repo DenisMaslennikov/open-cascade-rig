@@ -2,13 +2,16 @@
 
 When to read: before editing anything under `bin/`, `config/` or `tests/`.
 
-## Comments and docstrings
+## Written artefacts
 
 - A comment exists only where the code cannot state its intent: a non-obvious workaround, a quirk of
   an external tool, a deliberate deviation. Everything else belongs in the docstring.
 - A docstring describes behaviour, arguments, return value and raised errors. It never contains a call
   example — an example duplicates the signature and rots.
-- Comments, docstrings, commit messages and documentation are English.
+- Every remark and every comment about the project, and every description written into a file, is
+  English: review findings and review summaries, the pull-request body, the commit body, the plan and
+  evidence notes, the descriptions inside JSON artefacts, the comments in code and in configuration.
+- Russian is the language of the report to the owner in the chat and in Telegram, and of nothing else.
 
 ## Python
 
