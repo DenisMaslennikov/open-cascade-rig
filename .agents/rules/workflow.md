@@ -96,6 +96,47 @@ Traps, and what they look like from outside:
   resolution, a one-line typo in a document the card itself names, and a defect whose fix is already
   fully specified by a frozen test. Everything else starts with the decomposition.
 
+## The pipeline
+
+One card moves through the roles in a fixed order, in the vocabulary this repository already uses:
+the **architect** decomposes, the **specifier** freezes stubs and tests, the **executor**
+implements, the **reviewer** reviews each subtask diff, the **reviewer_final** reviews the whole
+feature branch before a human merges it.
+
+1. The orchestrator takes the card the owner names and hands it to the architect.
+2. The architect splits the card into separate subtasks and, for each one, states **what** is
+   written — the methods, the logic, the functions — and **where** it lives.
+3. From the architect's analysis the specifier implements the stubs and the tests that cover the
+   behaviour — one function per pass — and the tests are property-based (`hypothesis`).
+4. The executor takes those tests, the description of the logic and the stubs, and implements them —
+   also one function per run.
+5. The reviewer reviews the change of each function separately and says what to fix.
+6. The executor then closes the gaps in the logic's coverage: it freezes the implemented function
+   against changes, writes the test for the uncovered behaviour, runs the tests, and if a test
+   exposes a defect it fixes the function — the defect is fixed in the branch that is open, not
+   written down for later (`## Tech debt`).
+7. The reviewer reads everything that is finished and criticises it in full: tests that test
+   nothing, logic that breaks on non-standard parameters — and says what to fix.
+8. Every function and every slice of business logic lands as its own `task/<feat>/<subtask>` branch
+   merged into the card's feature branch `feat/<slug>`; after all of them are merged there is the
+   final review by a stronger model — the `reviewer_final` run.
+9. When the final review asks for changes, **the architect decides** whether the changes are made —
+   not the orchestrator. The executor writes the changes; the tests, when needed, are written by the
+   specifier.
+
+The invariants the procedure stands on:
+
+- The unit of work is one function or one slice of business logic: its own branch, its own review,
+  its own merge into the feature branch.
+- Placement is never invented downstream: the architect names it, the specifier and the executor
+  follow it.
+- The acceptance of a step is a command, and a step is finished when the command is green
+  (`## Gates`).
+- The decision to rework after the final review belongs to the architect, the writing to the
+  executor, the tests to the specifier — the orchestrator routes, it does not decide.
+- The reviewer reviews per function first and in full afterwards, and its second pass is where
+  vacuous tests and non-standard-parameter breakage are named explicitly (`## Review before merge`).
+
 ## Limits
 
 **No limits by default.** No cost cap, no reasoning cap, no phase timer on a role run: limits are decided

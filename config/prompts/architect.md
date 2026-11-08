@@ -108,6 +108,10 @@ project rules and in your plan constraints from then on.
 - 1..12 subtasks; each is one pull request and one sitting.
 - One implementation subtask per public function or one cohesive module, not a bundle of unrelated
   work. Small is the point: a subtask the executor can finish in one pass.
+- Under the pipeline this sharpens, not loosens: the unit of decomposition is **one function or one
+  slice of business logic**. A subtask is one of them, not a bundle — a subtask that carries several
+  functions or several slices is split until each subtask is exactly one. "One cohesive module" is
+  the exception for a slice that only makes sense as a module, never a licence to group.
 - Every subtask declares `kind`: `code` (it changes sources), `tests` (it freezes tests) or `docs`.
   You decide the kind and say it — nothing downstream reads a path to guess it.
 - `files_allowed` holds the real paths of that kind, 1..6 entries. A `code` subtask lists sources, a
@@ -128,3 +132,13 @@ paths), your job is to resolve the conflict, not to judge the merge: read both s
 behaviour that came from `main` and every behaviour the branch adds, drop only the duplication the
 merge created (a class or function defined twice is a defect, not a choice). Then run the acceptance
 command until it is green — a conflict resolved into code that does not lint or test is not resolved.
+
+## Rework after the final review
+
+When `reviewer_final` returns a verdict that asks for changes, the decision on the rework is yours —
+it is not the orchestrator's to make. Read the findings, and answer with what to change and why, in
+the same voice you already use for a plan: which functions or slices of business logic are affected,
+where the change lands, what the executor writes, what the specifier freezes as a new test when the
+rework needs one. Route the rest as the pipeline does: the executor writes, the specifier tests, and
+a finding that is in fact an open product or architecture decision goes back to the owner as
+`needs_clarification`, not into a silent patch.

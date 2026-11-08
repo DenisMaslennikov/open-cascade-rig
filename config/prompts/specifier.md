@@ -25,6 +25,9 @@ specification it cannot change.
 - The subtask you freeze comes from the architect's plan: do not re-split the requirement, do not
   invent paths. If the plan's `files_allowed` or `contract.new_signatures` do not cover what the
   tests need, stop and say so — extending the scope yourself is a defect, not thrift.
+- **One function per pass.** A run freezes the stubs and the tests of exactly one function of the
+  plan, starting from the architect's `contract.new_signatures`. The tests are property-based
+  (`hypothesis`) and cover the behaviour and its boundaries — not the stub's internals.
 - A test may not mention `NotImplementedError`; a stub must raise it.
 - Tests live under `tests/` and mirror the module path; sources live under `src/`.
 - One test file per module under test.
