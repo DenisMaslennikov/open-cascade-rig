@@ -10,11 +10,12 @@ plannable, and a test subtask under `bin/tests/` must not be read as a source su
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import pytest
 from hypothesis import given
 from hypothesis import strategies as st
-from rig.validate_plan import check_plan, schema_path
+from rig.validate_plan import check_plan, main, schema_path
 
 SRC_PREFIXES = ["src", "app", "lib", "pkg", "bin", "tools", "alembic"]
 
@@ -110,3 +111,31 @@ def test_paths_outside_the_alphabet_are_rejected(path: str):
     errors = check_plan(plan(("one", [path])))
 
     assert errors, f"{path} should not validate"
+
+
+def test_main_parses_the_plan_and_the_repo_with_argparse(tmp_path: Path):
+    """The CLI is argparse, not hand-rolled argv: one positional plan and an optional --repo."""
+    probe = tmp_path / "plan.json"
+    probe.write_text(
+        json.dumps(plan(("one", ["tools/wrapper/rail_db.py"]))),
+        encoding="utf-8",
+    )
+
+    assert main([str(probe), "--repo", str(tmp_path)]) == 0
+
+
+def test_main_reports_an_invalid_plan_with_exit_code_one(tmp_path: Path):
+    broken = dict(plan(("one", ["tools/wrapper/rail_db.py"])))
+    broken["subtasks"][0]["files_allowed"] = ["config/schema/plan.schema.json"]
+    probe = tmp_path / "plan.json"
+    probe.write_text(json.dumps(broken), encoding="utf-8")
+
+    assert main([str(probe)]) == 1
+
+
+def test_main_without_a_plan_exits_two():
+    """argparse owns the usage message; a missing argument is a usage error, not a crash."""
+    with pytest.raises(SystemExit) as exit_info:
+        main([])
+
+    assert exit_info.value.code == 2

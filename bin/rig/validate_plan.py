@@ -19,6 +19,7 @@ Exit code 0 — план валиден, 1 — есть ошибки (печат
 
 from __future__ import annotations
 
+import argparse
 import json
 import os
 import sys
@@ -192,20 +193,21 @@ def check_plan(plan: dict, repo: Path | None = None) -> list[str]:
     return errors
 
 
-def main() -> int:
-    args = [a for a in sys.argv[1:] if not a.startswith("--")]
-    if not args:
-        print(__doc__)
-        return 2
-    plan_path = args[0]
-    repo = None
-    if "--repo" in sys.argv:
-        repo = sys.argv[sys.argv.index("--repo") + 1]
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(
+        prog="python3 -m rig.validate_plan",
+        description="Deterministic check of a decomposition plan against the plan schema and the rules.",
+        epilog=__doc__,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    parser.add_argument("plan", type=Path, help="plan JSON file")
+    parser.add_argument("--repo", type=Path, default=None, help="repository the plan's paths must exist in")
+    args = parser.parse_args(argv)
 
-    with open(plan_path) as f:
+    with open(args.plan) as f:
         plan = json.load(f)
 
-    errors = check_plan(plan, Path(repo) if repo else None)
+    errors = check_plan(plan, args.repo)
 
     if errors:
         print("\n".join("ERROR: " + e for e in errors), file=sys.stderr)
