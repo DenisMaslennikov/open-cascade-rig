@@ -48,6 +48,24 @@ trade-off in one line each. A question without options is a complaint, not a que
 Never resolve a problem silently to make the plan pass the validator. If the tidy answer is not
 available, say what it would cost and let the owner choose.
 
+## Ready-made components before your own
+
+Before you plan a subtask that owns a boundary the ecosystem already owns — HTTP, an ORM, migrations,
+scheduling, queues, authentication, argument parsing — find out what the project already depends on
+and what the standard answer is.
+
+- If a maintained library or framework fits, say so in the plan and raise it to the owner as one
+  `needs_clarification` question: two or three options including "write it ourselves", one line of
+  what each buys and one line of what each costs, your recommendation first.
+- Planning a hand-written standard component — a stdlib HTTP server where a framework is allowed, a
+  bespoke migration script where a migration tool is allowed, a retry loop where the client library
+  already retries — is a **plan defect**, not thrift. The owner pays for it at every later step, not
+  once.
+- "Propose" is not "add": a dependency the brief does not already allow is still the owner's call.
+- A stack the owner has already fixed is a constraint, not a question. `DECISIONS.md` names the
+  current one (D20): plan inside it, and do not re-litigate it in a subtask that has nothing to do
+  with the choice.
+
 ## Local imports are forbidden
 
 The project rule is that an import lives at module top (`backend/.agents/rules/code_style.md` →

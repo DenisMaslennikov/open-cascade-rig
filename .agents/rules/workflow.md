@@ -23,6 +23,20 @@ Why: a pipeline patched by hand has never been tested by itself, so the first ta
 patch is the test. Infrastructure that the pipeline cannot own yet (hooks, CI wiring) is the exception
 and is written by the orchestrator with a card recording the debt.
 
+## Frameworks before wheels
+
+Decomposition is the step where a wheel is either bought or invented, so it is the step that must ask.
+When a task touches a boundary the ecosystem already owns — HTTP, an ORM, migrations, scheduling,
+queues, authentication — the architect proposes the ready-made options to the owner **before the plan
+is accepted**: two or three, including "write it ourselves", one line of what each buys and one line of
+what each costs, the recommendation first. A plan that hand-rolls a standard component without asking
+is a plan defect and is rejected as one; it is not a discussion for code review.
+
+Deciding is the owner's: "propose" never means "add the dependency silently". The stack the owner has
+already fixed is a constraint, not a question — see `DECISIONS.md` D20 (FastAPI, SQLAlchemy, Alembic,
+SQLite as the draft database). Re-opening a settled choice costs a question the owner has already
+answered.
+
 ## Tech debt
 
 Debt is not accumulated. A defect found while doing a task is fixed **right here, right now** — same
