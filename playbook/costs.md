@@ -16,8 +16,8 @@ not the currency the owner budgets in, so quoting them produced a "$93 for a day
 wrong and alarming. Do not copy gateway prices into this repository.
 
 ```
-bin/prices_openrouter.py --refresh            # weekly job; needs the LAN SOCKS proxy
-bin/prices_openrouter.py --report --days 1    # reprice the ledger with OpenRouter prices
+cd bin && python3 -m rig.prices_openrouter --refresh            # weekly job; needs the LAN SOCKS proxy
+cd bin && python3 -m rig.prices_openrouter --report --days 1    # reprice the ledger with OpenRouter prices
 ```
 
 The catalogue is cached in `~/.local/state/cascade/pricing-openrouter.json` — data, not knowledge, so it
@@ -40,10 +40,10 @@ openrouter.ai is answered with 403 from this host.
 
 ## Procedure
 
-- Record every call: `bin/usage.py record ...` writes to the project ledger; nothing is "closed" until
+- Record every call: `bin/rig/usage.py record ...` writes to the project ledger; nothing is "closed" until
   its cost is recorded.
-- Report per phase: `bin/usage.py report -p <project> [--feature F] [--task T] [--json]`, or
-  `bin/prices_openrouter.py --report` for a priced view.
+- Report per phase: `bin/rig/usage.py report -p <project> [--feature F] [--task T] [--json]`, or
+  `cd bin && python3 -m rig.prices_openrouter --report` for a priced view.
 - Put the cost into the commit body of the task: tokens per role and model, and the OpenRouter-based
   cost with the source named. Give the owner the same list in the chat and in Telegram, including a
   separate line for wasted iterations.

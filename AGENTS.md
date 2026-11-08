@@ -34,7 +34,7 @@ Read this first, then only the files the task actually touches. Everything here 
    with options, never a workaround with an import inside a function.
 9. **No environment-specific defaults in code.** A gateway URL, a proxy, a hostname or a home path as
    a fallback works on one machine and hides that it was never configured. Project config → variable →
-   fail with an instruction. `bin/rig_conf.py` is the only resolver.
+   fail with an instruction. `bin/rig/rig_conf.py` is the only resolver.
 10. **The rig develops itself.** A change to `bin/`, `config/` or a gate becomes a card that the
    cascade executes; the orchestrator opens cards, arbitrates and merges. Hooks and CI wiring are the
    declared exception, written by the orchestrator with the debt recorded.
@@ -49,10 +49,12 @@ Hooks are versioned: `git config core.hooksPath .githooks` once per clone (the p
 to commit a staged file that also has unstaged edits, because the formatter would take them).
 
 ```bash
+# Scripts are a package (`bin/rig`) and are run from `bin`: python3 -m rig.<tool>. The package is
+# called `rig`, not `src`, because mutmut 3.8 reserves the `src.` prefix for itself (stats.py asserts).
 python3 -m ruff check . && python3 -m ruff format --check .   # or: make lint / make fmt
-python3 -m pytest                                            # or: make test
-python3 -m pytest -m property                                # or: make property
-python3 -m mutmut run --paths-to-mutate=bin/<module>.py      # or: make mutation MUTATE=bin/<module>.py
+cd bin && python3 -m pytest                                  # or: make test
+cd bin && python3 -m pytest -m property                      # or: make property
+cd bin && python3 -m mutmut run "rig.<module>.x_*"           # or: make mutation MUTATE=bin/rig/<module>.py
 semgrep --config .semgrep.yml --severity ERROR --error       # the environment-defaults rule lives here
 gitleaks detect --no-git --redact --source .                 # secrets, seconds
 ```

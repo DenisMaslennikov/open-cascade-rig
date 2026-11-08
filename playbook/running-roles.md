@@ -11,7 +11,7 @@ completion cannot do that: the model answers prose about code it has not opened.
 ## Procedure
 
 ```
-bin/run_role.py --project <slug> --role <role> --request @brief.md --worktree <wt> \
+cd bin && python3 -m rig.run_role --project <slug> --role <role> --request @brief.md --worktree <wt> \
   [--allowed a.py,b.py] [--verify "<command>"] [--model M] [--iterations N] [--budget B]
 ```
 

@@ -21,18 +21,26 @@ fmt: venv
 	@$(VENV)/bin/python -m ruff format .
 
 test: venv
-	@$(VENV)/bin/python -m pytest
+	@cd bin && $(CURDIR)/$(VENV)/bin/python -m pytest
 
 # Property tests answering "does this hold for every input, not just the example in the test"
 property: venv
 	@$(VENV)/bin/python -m pytest -m property
 
 # Mutation over the module a pull request touched. A whole-repository run is minutes for a signal
-# nobody reads, so CI passes the paths explicitly.
-MUTATE ?= bin/
+# nobody reads, so the target names one module. mutmut 3.x takes no path flag: the source root comes
+# from `bin/setup.cfg` (`source_paths = rig`) and the scope is a mutant-name glob, so
+# `MUTATE=bin/rig/<module>.py` becomes `rig.<module>.x_*`. The run happens *in* `bin`, because the
+# mutant key is the path relative to the directory mutmut runs in, and that is the name the tests
+# import (`from rig import …`). The package is called `rig` and not `src` because mutmut 3.8 reserves
+# the `src.` prefix for itself (stats.py asserts on it).
+# A red run is a red gate: no `|| true` here.
+MUTATE ?= bin/rig/schema_design.py
+MODULE_GLOB = $$(printf '%s' $(MUTATE) | sed -e 's|^bin/rig/|rig.|' -e 's|\.py$$|.x_*|')
 mutation: venv
-	@$(VENV)/bin/python -m mutmut run --paths-to-mutate=$(MUTATE) || true
-	@$(VENV)/bin/python -m mutmut results
+	@rm -rf bin/mutants
+	@cd bin && $(CURDIR)/$(VENV)/bin/python -m mutmut run --max-children 4 "$(MODULE_GLOB)"
+	@cd bin && $(CURDIR)/$(VENV)/bin/python -m mutmut results
 
 # ERROR findings block; WARNING findings are printed and tracked on the board (see .semgrep.yml).
 semgrep:

@@ -15,8 +15,8 @@ select = ["E4", "E7", "E9", "F", "I", "UP", "B", "S", "RUF"]
 ignore = ["S101"]  # asserts are the point of a test
 
 [tool.ruff.lint.per-file-ignores]
-"tests/**" = ["S105", "S106"]
-"bin/pr_review.py" = ["S310"]  # the review engine is an authenticated HTTP client
+"bin/tests/**" = ["S105", "S106"]
+"bin/rig/pr_review.py" = ["S310"]  # the review engine is an authenticated HTTP client
 # Debt, recorded rather than hidden. These scripts were written before the gate existed; the rules
 # above are the standard, and the ignores below are the exact places that do not meet it yet. Each
 # line names the class of finding it suppresses, so removing one is a measurable task.
@@ -36,20 +36,16 @@ ignore = ["S101"]  # asserts are the point of a test
 # The two findings this module still carries. F821 was here until card #182: `brief` is now bound
 # from `--request` in the design branch, so the undefined name is gone rather than suppressed.
 # Card #183 removes the rest together with the other recorded debt.
-"bin/schema_design.py" = ["B007", "E741"]
+"bin/rig/schema_design.py" = ["B007", "E741"]
 # tools/board talks to Vikunja and GitHub over urllib and calls `gh`: the URL is built from config,
 # not from user input, so S310/S603/S607 are by-design here rather than debt.
 "tools/**" = ["S310", "S603", "S607"]
 
 [tool.pytest.ini_options]
-testpaths = ["tests"]
-pythonpath = ["bin"]
+testpaths = ["bin/tests"]
+# A mutation run leaves its copy of the tree in mutants/; collecting it would import the same test
+# module twice and fail the suite that has just been checked.
+norecursedirs = ["mutants", ".venv", "__pycache__"]
 addopts = "-q"
 # Property-based tests default to many more examples than a unit test needs; the cap keeps CI honest.
 markers = ["property: hypothesis-driven, seconds per test"]
-
-[tool.mutmut]
-# Mutation runs only over the module a pull request touched, and only through the Makefile target:
-# a whole-repository run is minutes of CPU for a signal nobody reads.
-paths_to_mutate = "bin/"
-tests_dir = "tests/"
