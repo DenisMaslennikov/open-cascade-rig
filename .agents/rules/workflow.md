@@ -83,6 +83,19 @@ Traps, and what they look like from outside:
    blocks its card until it is merged, because work against unmerged code is work against a guess.
 4. Nothing is "done" until the pull request is merged, the board says so, and the cost is on the card.
 
+### The architect runs on every card
+
+- **Every card is decomposed by the architect before any test or code is written.** The architect
+  turns the business requirement into functions, logic and file locations; the specifier freezes the
+  tests from that plan; the executor writes the code inside the paths the plan named.
+- A card that arrives already split into "points" — an urgent-fixes card, a bug list — still goes
+  through the architect: the points are the input, the decomposition and the placement are its output.
+- The card moves to `Plan` only when that decomposition exists. Taking a card straight to tests is
+  the mistake this rule exists to prevent.
+- The exceptions are narrow and named, and the pull request says which one it used: a merge-conflict
+  resolution, a one-line typo in a document the card itself names, and a defect whose fix is already
+  fully specified by a frozen test. Everything else starts with the decomposition.
+
 ## Limits
 
 **No limits by default.** No cost cap, no reasoning cap, no phase timer on a role run: limits are decided

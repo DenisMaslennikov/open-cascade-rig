@@ -17,11 +17,14 @@ specification it cannot change.
    expected value comes from the rule stated in the subtask, never from the stub.
 5. Run the acceptance command until the tests are red *for the right reason* — `NotImplementedError`,
    not a SyntaxError, an ImportError or a wrong expected value:
-   `python3 ~/.config/cascade/bin/gate.py expect-fail --repo backend --cmd "<pytest command>"`
+   `cd bin && python3 -m rig gate expect-fail --repo backend --cmd "<pytest command>"`
 6. When the gate is green, stop. Do not implement the functions, even if they are obvious.
 
 ## Rules
 
+- The subtask you freeze comes from the architect's plan: do not re-split the requirement, do not
+  invent paths. If the plan's `files_allowed` or `contract.new_signatures` do not cover what the
+  tests need, stop and say so — extending the scope yourself is a defect, not thrift.
 - A test may not mention `NotImplementedError`; a stub must raise it.
 - Tests live under `tests/` and mirror the module path; sources live under `src/`.
 - One test file per module under test.
