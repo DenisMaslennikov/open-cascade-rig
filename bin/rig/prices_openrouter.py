@@ -98,7 +98,11 @@ def price_of(models: dict, name: str) -> dict | None:
 
 def report(models: dict, days: int, project: str | None, as_json: bool = False) -> int:
     since = (datetime.now(UTC) - timedelta(days=days)).isoformat(timespec="seconds")
-    ledgers = [STATE / project / "usage.jsonl"] if project else sorted(STATE.glob("*/usage.jsonl"))
+    if project:
+        ledgers = [STATE / project / "usage.jsonl"]
+    else:
+        # A project directory may alias another through a symlink; the resolved form decides, first wins.
+        ledgers = list({str(ledger.resolve()): ledger for ledger in sorted(STATE.glob("*/usage.jsonl"))}.values())
     rows: dict[str, dict] = {}
     unknown: set[str] = set()
     for ledger in ledgers:
