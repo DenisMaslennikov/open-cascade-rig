@@ -167,6 +167,35 @@ def test_a_commit_refused_by_hooks_is_reported_with_the_reason_git_relays(tmp_pa
     assert _head(worktree) == base
 
 
+ROLE_AUTHORS = ("cascade-specifier", "cascade-reviewer", "cascade-architect")
+
+
+@pytest.mark.parametrize("author", ROLE_AUTHORS)
+def test_the_commit_it_creates_is_authored_by_the_name_given(tmp_path, author):
+    worktree = _repository(tmp_path)
+    base = _head(worktree)
+    _leave_uncommitted_work(worktree)
+
+    result = settle_worktree(worktree, base, True, MESSAGE, author=author)
+
+    assert result["ok"] is True
+    assert _git(worktree, "log", "-1", "--pretty=%an").stdout.strip() == author
+    assert _git(worktree, "log", "-1", "--pretty=%ae").stdout.strip() == "cascade@localhost"
+    assert _git(worktree, "log", "-1", "--pretty=%s").stdout.strip() == MESSAGE
+
+
+def test_a_commit_without_an_author_is_authored_cascade(tmp_path):
+    worktree = _repository(tmp_path)
+    base = _head(worktree)
+    _leave_uncommitted_work(worktree)
+
+    result = settle_worktree(worktree, base, True, MESSAGE)
+
+    assert result["ok"] is True
+    assert _git(worktree, "log", "-1", "--pretty=%an").stdout.strip() == "cascade"
+    assert _git(worktree, "log", "-1", "--pretty=%ae").stdout.strip() == "cascade@localhost"
+
+
 @pytest.mark.property
 @settings(
     max_examples=24,

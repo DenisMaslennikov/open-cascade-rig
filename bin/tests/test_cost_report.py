@@ -72,6 +72,33 @@ def _done(
     }
 
 
+def _starting(role: str, started: datetime, pid: int) -> dict:
+    """The record `run_role.py` writes when it starts: no usage yet, and the pid of the process."""
+    return {
+        "role": role,
+        "state": "starting",
+        "pid": pid,
+        "started": _stamp(started),
+        "model": MODEL,
+    }
+
+
+def _alive(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+    except (OSError, ValueError):
+        return False
+    return True
+
+
+def _dead_pid() -> int:
+    """A pid no process holds, found the way `run_records_reconcile.py` tests for liveness."""
+    pid = 4_194_304  # above the default Linux `pid_max`; step up on a machine that raised it
+    while _alive(pid):
+        pid += 1
+    return pid
+
+
 def _write_record(state_root: Path, record: dict) -> Path:
     path = state_root / "cascade" / SLUG / "roles" / record["role"] / record["started"] / "record.json"
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -171,6 +198,14 @@ def scenario(state_root: Path, now: datetime) -> dict:
         ],
     )
     return {"executor_start": executor_start, "reviewer_start": reviewer_start}
+
+
+@pytest.fixture
+def live_run(state_root: Path, now: datetime) -> dict:
+    """A `starting` record whose pid is this test process, so the run is visibly still going."""
+    record = _starting("specifier", now - timedelta(hours=2), os.getpid())
+    _write_record(state_root, record)
+    return record
 
 
 def test_a_done_run_lands_in_ok_and_the_killed_record_in_failed(state_root, scenario):
@@ -311,3 +346,48 @@ def test_a_report_without_a_project_is_a_usage_error(state_root):
     assert proc.returncode == 2
     assert "--project" in proc.stderr
     assert "Traceback" not in proc.stderr
+
+
+def test_a_run_still_in_progress_is_in_neither_table(state_root, live_run):
+    payload = _report_json(state_root)
+
+    assert payload["ok"] == []
+    assert payload["failed"] == []
+    assert payload["totals"]["failed"]["gateway_usd"] == pytest.approx(0.0)
+    assert payload["totals"]["failed"]["input_tokens"] == 0
+
+
+def test_the_report_says_on_stderr_that_it_skipped_a_run_in_progress(state_root, live_run):
+    proc = _run(state_root, "--project", SLUG, "--days", "7")
+
+    assert proc.returncode == 0, proc.stderr
+    assert proc.stderr.strip()
+    assert "skip" in proc.stderr.lower()
+    assert str(live_run["pid"]) in proc.stderr or live_run["started"] in proc.stderr
+
+
+def test_a_starting_record_whose_process_is_gone_is_still_a_failed_attempt(state_root, now):
+    _write_record(state_root, _starting("specifier", now - timedelta(hours=2), _dead_pid()))
+
+    payload = _report_json(state_root)
+
+    assert payload["ok"] == []
+    assert [row["role"] for row in payload["failed"]] == ["specifier"]
+
+
+@pytest.mark.parametrize("state", ["failed", "killed", "out of scope"])
+def test_a_finished_unsuccessful_record_stays_in_the_failed_table(state_root, now, state):
+    _write_record(
+        state_root,
+        {
+            "role": "reviewer",
+            "state": state,
+            "started": _stamp(now - timedelta(hours=2)),
+            "model": MODEL,
+        },
+    )
+
+    payload = _report_json(state_root)
+
+    assert payload["ok"] == []
+    assert [row["role"] for row in payload["failed"]] == ["reviewer"]
