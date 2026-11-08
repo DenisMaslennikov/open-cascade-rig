@@ -163,7 +163,7 @@ def changed_files(worktree: Path, base: str | None = None) -> list[str]:
     return sorted({p.strip() for p in (*tracked, *staged, *untracked, *committed) if p.strip()})
 
 
-def settle_worktree(worktree: Path, base: str, verify_ok: bool, message: str) -> dict:
+def settle_worktree(worktree: Path, base: str, verify_ok: bool, message: str, author: str | None = None) -> dict:
     """Settle a finished run into a commit that resolves, or into a non-empty reason.
 
     A run ends in exactly one of three states: the work is uncommitted and gets committed here with
@@ -174,7 +174,9 @@ def settle_worktree(worktree: Path, base: str, verify_ok: bool, message: str) ->
 
     Arguments: `worktree` is the repository the role worked in, `base` is the HEAD the run started
     from, `verify_ok` says the acceptance command passed, `message` is the commit message for
-    uncommitted work. Returns {"commit": sha|None, "ok": bool, "error": str|None}; `ok` is False
+    uncommitted work, `author` is the `user.name` of the commit this function creates (default
+    `cascade`, since a commit the rig makes on its own behalf is not one role's work). Returns
+    {"commit": sha|None, "ok": bool, "error": str|None}; `ok` is False
     only with a non-empty `error` and never with a commit, and True only with `commit` equal to the
     worktree's HEAD after the call.
     """
@@ -190,7 +192,7 @@ def settle_worktree(worktree: Path, base: str, verify_ok: bool, message: str) ->
         commit = git(
             worktree,
             "-c",
-            "user.name=cascade-executor",
+            f"user.name={author or 'cascade'}",
             "-c",
             "user.email=cascade@localhost",
             "commit",
@@ -631,7 +633,11 @@ def main() -> int:
         result["verify"] = verify
 
     settled = settle_worktree(
-        worktree, base, verify is None or verify["exit"] == 0, f"{args.role}: {request.strip().splitlines()[0][:80]}"
+        worktree,
+        base,
+        verify is None or verify["exit"] == 0,
+        f"{args.role}: {request.strip().splitlines()[0][:80]}",
+        author=f"cascade-{args.role}",
     )
     result["commit"] = settled["commit"]
     result["ok"] = settled["ok"]

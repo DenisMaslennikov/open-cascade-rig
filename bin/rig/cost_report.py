@@ -15,8 +15,13 @@ Both tables carry the same columns: role | model | input tokens | output tokens 
 cost in gateway prices (USD) | cost in OpenRouter list prices (USD):
 
   1. successful runs — a record with `state == "done"` and a `result.usage` block;
-  2. failed attempts — a record with `state` in failed/killed/starting, plus the window's ledger
-     spend that no successful run explains.
+  2. failed attempts — everything else that is not a live run: the failed/killed/out-of-scope records,
+     a `starting`/`running` record whose pid is gone, plus the window's ledger spend that no
+     successful run explains.
+
+A run in progress — a record in `starting`/`running` whose pid the OS still holds (`os.kill(pid, 0)`
+succeeding, the test `run_records_reconcile.py` uses) — is neither a success nor a failure: it lands
+in neither table and the tool says on stderr that it skipped it, naming the run directory and the pid.
 
 Attribution: a ledger event belongs to a successful run when its `role` and `model` match that record
 and its `ts` falls inside `[record.started, record.started + result.usage.seconds]`. Every other event
@@ -52,15 +57,17 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from collections.abc import Iterable
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from typing import Any
 
 from .prices_openrouter import CACHE, price_of
 from .rig_conf import STATE
 
-FAILED_STATES = ("failed", "killed", "starting")
+LIVE_STATES = ("starting", "running")
 STAMP_FORMAT = "%Y%m%dT%H%M%SZ"
 FIELDS = ("input_tokens", "output_tokens", "cache_read_tokens", "gateway_usd", "openrouter_usd")
 
@@ -109,12 +116,33 @@ def _iso_moment(ts: str) -> datetime | None:
     return moment.replace(tzinfo=UTC) if moment.tzinfo is None else moment.astimezone(UTC)
 
 
-def _read_records(project: str, since: datetime) -> list[dict]:
-    """Records of one project whose `started` stamp falls inside the window.
+def _alive(pid: Any) -> bool:
+    """Whether a process with that pid exists and can be signalled.
+
+    The same test `run_records_reconcile.py` uses in the state directory: `os.kill(pid, 0)` succeeds
+    for a live process and fails with `OSError` for a gone one.
+    """
+    if not pid:
+        return False
+    try:
+        os.kill(int(pid), 0)
+    except (OSError, ValueError):
+        return False
+    return True
+
+
+def _is_live_run(record: dict) -> bool:
+    """Whether the record's run is still going: a live state and a pid the OS still holds."""
+    return record.get("state") in LIVE_STATES and _alive(record.get("pid"))
+
+
+def _read_records(project: str, since: datetime) -> list[tuple[dict, Path]]:
+    """Records of one project whose `started` stamp falls inside the window, with their run directory.
 
     Returns:
-        The parsed `record.json` bodies under `<state>/<project>/roles/<role>/<stamp>/`, in no
-        particular order; directories whose name is not a stamp are not runs and are skipped.
+        `(record, run_dir)` pairs of the parsed `record.json` bodies under
+        `<state>/<project>/roles/<role>/<stamp>/`, in no particular order; directories whose name is
+        not a stamp are not runs and are skipped.
     """
     roles_dir = STATE / project / "roles"
     if not roles_dir.is_dir():
@@ -125,7 +153,7 @@ def _read_records(project: str, since: datetime) -> list[dict]:
         if stamp_moment is None or stamp_moment < since:
             continue
         try:
-            records.append(json.loads(record_path.read_text(encoding="utf-8")))
+            records.append((json.loads(record_path.read_text(encoding="utf-8")), record_path.parent))
         except (json.JSONDecodeError, OSError):
             continue
     return records
@@ -226,19 +254,23 @@ def collect(project: str, days: int) -> dict[str, Any]:
 
     Returns:
         The payload of the report: the successful rows, the failed rows, and their totals, ordered by
-        role and then by model.
+        role and then by model, plus `skipped` — one stderr line per run in progress the window
+        holds, for the caller to print and to keep out of the payload it shows.
     """
     since = datetime.now(UTC) - timedelta(days=days)
     models: dict = json.loads(CACHE.read_text(encoding="utf-8"))["models"]
 
     successful: list[tuple[dict, datetime, datetime]] = []
     failed_records: list[dict] = []
-    for record in _read_records(project, since):
+    skipped: list[str] = []
+    for record, run_dir in _read_records(project, since):
         usage = _usage_of(record)
         if record.get("state") == "done" and usage:
             started = _stamp_moment(record.get("started") or "") or since
             end = started + timedelta(seconds=float(usage.get("seconds") or 0))
             successful.append((record, started, end))
+        elif _is_live_run(record):
+            skipped.append(f"skipped a run in progress: {run_dir} (pid {record.get('pid')})")
         else:
             failed_records.append(record)
 
@@ -293,7 +325,7 @@ def collect(project: str, days: int) -> dict[str, Any]:
 
     ok = _finish(ok_rows.values())
     failed = _finish(failed_rows.values())
-    return {"ok": ok, "failed": failed, "totals": {"ok": _totals(ok), "failed": _totals(failed)}}
+    return {"ok": ok, "failed": failed, "totals": {"ok": _totals(ok), "failed": _totals(failed)}, "skipped": skipped}
 
 
 def _print_table(title: str, rows: list[dict], totals: dict) -> None:
@@ -324,6 +356,8 @@ def main() -> int:
         )
         return 1
     report = collect(args.project, args.days)
+    for note in report.pop("skipped"):
+        print(note, file=sys.stderr)
     report.update(
         {"prices": "OpenRouter", "since": (datetime.now(UTC) - timedelta(days=args.days)).isoformat(timespec="seconds")}
     )
