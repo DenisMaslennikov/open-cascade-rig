@@ -38,6 +38,21 @@ def sessions_of(limit: int) -> Sequence[SessionRow]:
     return SESSIONS[:limit]
 
 
+def unknown_project(project: str) -> Sequence[CardView]:
+    """Refuse a project the board source does not know, the way the real source does."""
+    raise UnknownProjectError(project)
+
+
+def broken_board(project: str) -> Sequence[CardView]:
+    """Fail the board lookup with an error that names no upstream."""
+    raise RuntimeError("upstream refused the connection")
+
+
+def broken_dashboard(limit: int) -> Sequence[SessionRow]:
+    """Fail the session lookup with an error that names no upstream."""
+    raise RuntimeError("upstream refused the connection")
+
+
 @pytest.fixture
 def make_client(tmp_path: Path) -> Iterator[Callable[..., TestClient]]:
     """Build ASGI clients over an empty static directory and the given sources."""
@@ -152,51 +167,47 @@ def test_the_relative_age_is_localised_for_the_requested_language(
 
 
 @given(st.one_of(st.integers(), st.text(), st.lists(st.integers())))
-def test_a_seen_map_that_is_not_an_object_is_rejected(client: TestClient, broken_seen: object) -> None:
-    response = client.post("/api/rail", json={"project": "cascade-rig", "seen": broken_seen, "lang": "en"})
+def test_a_seen_map_that_is_not_an_object_is_rejected(
+    tmp_path_factory: pytest.TempPathFactory, broken_seen: object
+) -> None:
+    static = tmp_path_factory.mktemp("rail-static")
+    with TestClient(create_app(cards_of, sessions_of, static)) as client:
+        response = client.post("/api/rail", json={"project": "cascade-rig", "seen": broken_seen, "lang": "en"})
 
     assert response.status_code == 400
 
 
 def test_an_unknown_project_is_rejected(make_client: Callable[..., TestClient]) -> None:
-    def unknown(project: str) -> Sequence[CardView]:
-        raise UnknownProjectError(project)
-
-    with make_client(cards=unknown) as started:
-        response = started.post("/api/rail", json={"project": "missing", "seen": {}, "lang": "en"})
+    with make_client(cards=unknown_project) as client:
+        response = client.post("/api/rail", json={"project": "no-such-project", "seen": {}, "lang": "en"})
 
     assert response.status_code == 400
 
 
-def test_a_failing_board_source_becomes_a_bad_gateway_naming_board(
+def test_a_failing_board_source_becomes_a_bad_gateway_naming_the_board(
     make_client: Callable[..., TestClient],
 ) -> None:
-    def failing(project: str) -> Sequence[CardView]:
-        raise RuntimeError("board is down")
-
-    with make_client(cards=failing) as started:
-        response = started.post("/api/rail", json={"project": "cascade-rig", "seen": {}, "lang": "en"})
+    with make_client(cards=broken_board) as client:
+        response = client.post("/api/rail", json={"project": "cascade-rig", "seen": {}, "lang": "en"})
 
     assert response.status_code == 502
     assert "board" in response.text.lower()
+    assert "dashboard" not in response.text.lower()
 
 
-def test_a_failing_sessions_source_becomes_a_bad_gateway_naming_dashboard(
+def test_a_failing_sessions_source_becomes_a_bad_gateway_naming_the_dashboard(
     make_client: Callable[..., TestClient],
 ) -> None:
-    def failing(limit: int) -> Sequence[SessionRow]:
-        raise RuntimeError("dashboard is down")
-
-    with make_client(sessions=failing) as started:
-        response = started.post("/api/rail", json={"project": "cascade-rig", "seen": {}, "lang": "en"})
+    with make_client(sessions=broken_dashboard) as client:
+        response = client.post("/api/rail", json={"project": "cascade-rig", "seen": {}, "lang": "en"})
 
     assert response.status_code == 502
     assert "dashboard" in response.text.lower()
+    assert "board" not in response.text.lower()
 
 
-def test_health_reports_the_service_is_ready(client: TestClient) -> None:
+def test_the_health_endpoint_reports_ok(client: TestClient) -> None:
     response = client.get("/api/health")
 
     assert response.status_code == 200
-    body = response.json()
-    assert body.get("status") == "ok" or body.get("ok") is True
+    assert response.json() == {"status": "ok"}
