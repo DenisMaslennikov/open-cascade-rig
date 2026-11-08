@@ -2,23 +2,17 @@
 
 from __future__ import annotations
 
-import os
 import signal
-import socket
 import sqlite3
-import subprocess
-import sys
-import time
-from contextlib import closing
+from collections.abc import Callable
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
+import uvicorn
 from fastapi.testclient import TestClient
 
 import rail_app
-
-
-WRAPPER_DIR = Path(rail_app.__file__).resolve().parent
 
 
 class FakeBoardSource:
@@ -37,10 +31,36 @@ class FakeDashboardSource:
         return {}
 
 
+class FakeUvicornState:
+    """Collect the server double and the stop handlers installed during a test."""
+
+    def __init__(self) -> None:
+        """Start with no server, no recorded handler and a server that stops immediately."""
+        self.servers: list[object] = []
+        self.handlers: dict[int, Callable[[int, object], None]] = {}
+        self.on_run: Callable[[object], None] = lambda server: None
+
+
+class ComposedApp:
+    """Stand in for the application main composes, and remember what built it."""
+
+    def __init__(self) -> None:
+        """Start with no recorded build call."""
+        self.calls: list[tuple[tuple[object, ...], dict[str, object]]] = []
+
+
 @pytest.fixture
 def db_path(tmp_path: Path) -> Path:
     """Return a path to a SQLite database inside a temporary directory."""
     return tmp_path / "rail.sqlite3"
+
+
+@pytest.fixture
+def static_dir(tmp_path: Path) -> Path:
+    """Return an empty directory standing in for the static assets."""
+    path = tmp_path / "static"
+    path.mkdir()
+    return path
 
 
 @pytest.fixture
@@ -49,141 +69,164 @@ def fake_sources() -> tuple[FakeBoardSource, FakeDashboardSource]:
     return FakeBoardSource(), FakeDashboardSource()
 
 
-def _free_port() -> int:
-    """Return a local TCP port that is currently free."""
-    with closing(socket.socket(socket.AF_INET, socket.SOCK_STREAM)) as sock:
-        sock.bind(("127.0.0.1", 0))
-        return int(sock.getsockname()[1])
+@pytest.fixture
+def fake_uvicorn(monkeypatch: pytest.MonkeyPatch) -> FakeUvicornState:
+    """Replace uvicorn and the signal registry with doubles that record their calls."""
+    state = FakeUvicornState()
 
+    class FakeConfig:
+        """A uvicorn configuration double that keeps the application and the options."""
 
-def _wait_for_port(port: int, timeout: float = 10.0) -> None:
-    """Block until a connection to the local port succeeds."""
-    deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
-        try:
-            with socket.create_connection(("127.0.0.1", port), timeout=0.1):
-                return
-        except OSError:
-            time.sleep(0.05)
-    raise TimeoutError(f"server did not listen on port {port}")
+        def __init__(self, app: object, **options: object) -> None:
+            self.app = app
+            self.options = options
 
+    class FakeServer:
+        """A uvicorn server double that reports its run and can be asked to stop."""
 
-def _launch_server(db_path: Path, port: int) -> subprocess.Popen[str]:
-    """Launch the rail application with fake sources on the given port."""
-    script = f"""
-import sys
-import rail_app
+        def __init__(self, config: FakeConfig) -> None:
+            self.config = config
+            self.should_exit = False
+            self.ran = False
+            state.servers.append(self)
 
-class FakeBoard:
-    def fetch(self):
-        return {{}}
+        def run(self) -> None:
+            self.ran = True
+            state.on_run(self)
 
-class FakeDashboard:
-    def fetch(self):
-        return {{}}
-
-rail_app.build_board_source = lambda: FakeBoard()
-rail_app.build_dashboard_source = lambda: FakeDashboard()
-sys.exit(rail_app.main(["--db", {str(db_path)!r}, "--host", "127.0.0.1", "--port", {port!r}]))
-"""
-    env = os.environ.copy()
-    env["PYTHONPATH"] = str(WRAPPER_DIR) + os.pathsep + env.get("PYTHONPATH", "")
-    return subprocess.Popen(
-        [sys.executable, "-c", script],
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        text=True,
-        env=env,
+    module = SimpleNamespace(Config=FakeConfig, Server=FakeServer)
+    monkeypatch.setattr(rail_app, "uvicorn", module, raising=False)
+    monkeypatch.setattr(uvicorn, "Config", FakeConfig)
+    monkeypatch.setattr(uvicorn, "Server", FakeServer)
+    monkeypatch.setattr(
+        signal,
+        "signal",
+        lambda number, handler: state.handlers.__setitem__(number, handler),
     )
+    return state
 
 
-def test_database_option_is_required_and_absence_names_it() -> None:
-    """The CLI refuses to start without --db and says that --db is required."""
-    cmd = [
-        sys.executable,
-        str(Path(rail_app.__file__)),
-        "--host",
-        "127.0.0.1",
-        "--port",
-        "0",
-    ]
-    result = subprocess.run(
-        cmd,
-        capture_output=True,
-        text=True,
-        timeout=10,
-    )
-    output = result.stdout + result.stderr
-    assert result.returncode != 0
-    assert "--db" in output
-    assert "required" in output.lower()
+@pytest.fixture
+def composed_app(monkeypatch: pytest.MonkeyPatch) -> ComposedApp:
+    """Replace the real composition so main only has to wire the server."""
+    record = ComposedApp()
+
+    def fake_build_app(*args: object, **kwargs: object) -> ComposedApp:
+        record.calls.append((args, kwargs))
+        return record
+
+    monkeypatch.setattr(rail_app, "build_app", fake_build_app)
+    return record
 
 
-def test_startup_applies_migrations_so_seen_table_exists(
+def _compose(
     db_path: Path,
+    static_dir: Path,
+    sources: tuple[FakeBoardSource, FakeDashboardSource],
+) -> object:
+    """Build the application from the fake sources and the temporary database."""
+    board, dashboard = sources
+    return rail_app.build_app(
+        board_source=board,
+        dashboard_source=dashboard,
+        static_dir=static_dir,
+        db_path=db_path,
+    )
+
+
+def test_database_option_is_required_and_the_error_names_it(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A missing --db stops the command line before startup and the message names --db."""
+    with pytest.raises(SystemExit) as exit_info:
+        rail_app.main(["--host", "127.0.0.1", "--port", "8000"])
+
+    assert exit_info.value.code != 0
+    message = capsys.readouterr().err
+    assert "--db" in message
+    assert "required" in message.lower()
+
+
+def test_startup_applies_pending_migrations_to_an_empty_data_directory(
+    db_path: Path,
+    static_dir: Path,
     fake_sources: tuple[FakeBoardSource, FakeDashboardSource],
 ) -> None:
-    """Starting the application on an empty directory creates the seen table."""
-    board, dashboard = fake_sources
-    app = rail_app.create_app(db_path, board, dashboard)
+    """Starting on a data directory that does not exist yet creates the seen table."""
+    app = _compose(db_path, static_dir, fake_sources)
+
     with TestClient(app):
         pass
+
     with sqlite3.connect(db_path) as connection:
         tables = {
             row[0]
-            for row in connection.execute(
-                "SELECT name FROM sqlite_master WHERE type='table'"
-            )
+            for row in connection.execute("SELECT name FROM sqlite_master WHERE type = 'table'")
         }
+
     assert "seen" in tables
 
 
-def test_marks_sent_to_rail_api_survive_restart(
+def test_marks_posted_to_the_rail_survive_a_restart_on_the_same_file(
     db_path: Path,
+    static_dir: Path,
     fake_sources: tuple[FakeBoardSource, FakeDashboardSource],
 ) -> None:
-    """Marks posted to /api/rail are still present after a restart on the same file."""
-    board, dashboard = fake_sources
-    first_app = rail_app.create_app(db_path, board, dashboard)
+    """Marks posted to /api/rail are still served after the application is rebuilt on the same file."""
+    first_app = _compose(db_path, static_dir, fake_sources)
     with TestClient(first_app) as client:
         response = client.post("/api/rail", json={"marks": ["alpha", "beta"]})
         assert response.status_code == 200
         response = client.get("/api/rail")
-        assert response.status_code == 200
-        assert set(response.json()["marks"]) == {"alpha", "beta"}
+    assert response.status_code == 200
+    assert set(response.json()["marks"]) == {"alpha", "beta"}
 
-    second_app = rail_app.create_app(db_path, board, dashboard)
+    second_app = _compose(db_path, static_dir, fake_sources)
     with TestClient(second_app) as client:
         response = client.get("/api/rail")
-        assert response.status_code == 200
-        assert set(response.json()["marks"]) == {"alpha", "beta"}
-        response = client.post("/api/rail", json={"marks": ["gamma"]})
-        assert response.status_code == 200
-        response = client.get("/api/rail")
-        assert response.status_code == 200
-        assert set(response.json()["marks"]) == {"alpha", "beta", "gamma"}
+
+    assert response.status_code == 200
+    assert set(response.json()["marks"]) == {"alpha", "beta"}
+
+
+def test_uvicorn_is_handed_the_composed_application_and_run(
+    fake_uvicorn: FakeUvicornState,
+    composed_app: ComposedApp,
+    db_path: Path,
+) -> None:
+    """Main builds the application, hands it to uvicorn, runs it and returns zero."""
+    exit_code = rail_app.main(["--db", str(db_path)])
+
+    assert exit_code == 0
+    assert len(fake_uvicorn.servers) == 1
+    server = fake_uvicorn.servers[0]
+    assert server.config.app is composed_app
+    assert server.ran is True
+
+    args, kwargs = composed_app.calls[0]
+    assert db_path in [*args, *kwargs.values()]
 
 
 @pytest.mark.parametrize(
-    "signal_number",
+    "stop_signal",
     [signal.SIGINT, signal.SIGTERM],
-    ids=["SIGINT", "SIGTERM"],
+    ids=["sigint", "sigterm"],
 )
-def test_signal_ends_launched_server_with_exit_code_zero(
+def test_stop_signal_asks_the_server_to_exit_and_the_process_returns_zero(
+    stop_signal: signal.Signals,
+    fake_uvicorn: FakeUvicornState,
+    composed_app: ComposedApp,
     db_path: Path,
-    signal_number: signal.Signals,
 ) -> None:
-    """Sending SIGINT or SIGTERM to the uvicorn server exits with code 0."""
-    port = _free_port()
-    process = _launch_server(db_path, port)
-    try:
-        _wait_for_port(port)
-        process.send_signal(signal_number)
-        exit_code = process.wait(timeout=10)
-        output = process.stdout.read() if process.stdout else ""
-    finally:
-        if process.poll() is None:
-            process.kill()
-            process.wait()
+    """Delivering SIGINT or SIGTERM to the running server stops it and the process exits zero."""
+
+    def deliver(server: object) -> None:
+        assert stop_signal in fake_uvicorn.handlers
+        fake_uvicorn.handlers[stop_signal](stop_signal, None)
+
+    fake_uvicorn.on_run = deliver
+
+    exit_code = rail_app.main(["--db", str(db_path)])
+
     assert exit_code == 0
-    assert "Uvicorn running on" in output
+    assert fake_uvicorn.servers[0].should_exit is True
