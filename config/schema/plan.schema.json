@@ -47,12 +47,22 @@
           "id",
           "title",
           "goal",
+          "kind",
           "files_allowed",
           "acceptance",
           "depends_on"
         ],
         "additionalProperties": false,
         "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "code",
+              "tests",
+              "docs"
+            ],
+            "description": "What this subtask produces: sources, frozen tests, or documentation. Declared by the architect, never inferred from a path."
+          },
           "id": {
             "type": "string",
             "pattern": "^[a-z0-9][a-z0-9-]{1,30}$"
@@ -72,7 +82,7 @@
             "maxItems": 6,
             "items": {
               "type": "string",
-              "pattern": "^((backend|frontend)/)?(src|tests|app|lib|pkg|tools|docs|scripts)/[^\\s]+$"
+              "pattern": "^((backend|frontend)/)?(src|tests|app|lib|pkg|tools|docs|scripts|bin|alembic)/[^\\s]+$|^(alembic\\.ini|pyproject\\.toml|requirements[^/\\s]*\\.txt)$"
             }
           },
           "contract": {

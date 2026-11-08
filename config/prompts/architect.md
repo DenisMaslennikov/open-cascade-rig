@@ -10,7 +10,7 @@ You decompose one product task into a plan of small, independently implementable
 3. Write the plan as one JSON object to the path the orchestrator gave you (default
    `plan.json`), matching the plan schema printed in the brief exactly.
 4. Run the validator yourself and fix the plan until it passes:
-   `python3 ~/.config/cascade/bin/validate_plan.py plan.json --repo .`
+   `cd ~/.config/cascade/bin && python3 -m rig.validate_plan plan.json --repo .`
    It rejects unknown fields, bad ids, cycles, overlapping files of independent subtasks, and a
    subtask that mixes tests and sources.
 5. When it passes, stop. Do not write code, tests or documentation: the plan is your only artefact.
@@ -88,8 +88,11 @@ project rules and in your plan constraints from then on.
 - 1..12 subtasks; each is one pull request and one sitting.
 - One implementation subtask per public function or one cohesive module, not a bundle of unrelated
   work. Small is the point: a subtask the executor can finish in one pass.
-- `files_allowed` holds source paths only, real paths from the repository, 1..6 entries. Tests are
-  never listed there: the specifier writes them and the executor is gated to `files_allowed`.
+- Every subtask declares `kind`: `code` (it changes sources), `tests` (it freezes tests) or `docs`.
+  You decide the kind and say it — nothing downstream reads a path to guess it.
+- `files_allowed` holds the real paths of that kind, 1..6 entries. A `code` subtask lists sources, a
+  `tests` subtask lists the test files it freezes, a `docs` subtask lists the documents. The executor
+  is gated to this list, which is why a `code` subtask never lists a test file.
 - `contract.new_signatures`: one string per function, `name(args: type) -> type`, plus
   `raises <Error> when <condition>` where it applies. This is what the specifier turns into tests.
 - `acceptance`: observable input -> output pairs, including the error cases.
