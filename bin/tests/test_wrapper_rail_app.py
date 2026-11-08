@@ -1,232 +1,171 @@
-"""Pin the composition and the command line of the rail application wrapper."""
+"""Behaviour of the rail composition module: the application factory and the command-line entry.
+
+Every boundary — the rail database, the board and dashboard sources, the server factory and uvicorn —
+is replaced, so no test opens a socket, a database file or a network connection.
+"""
 
 from __future__ import annotations
 
-import signal
-import sqlite3
-from collections.abc import Callable
-from pathlib import Path
-from types import SimpleNamespace
+from typing import Any
+from unittest.mock import MagicMock
 
 import pytest
-import uvicorn
-from fastapi.testclient import TestClient
+from hypothesis import HealthCheck, assume, given, settings
+from hypothesis import strategies as st
 
-import rail_app
-
-
-class FakeBoardSource:
-    """A board source that never touches the network."""
-
-    def fetch(self) -> dict:
-        """Return an empty board."""
-        return {}
+from tools.wrapper import rail_app
 
 
-class FakeDashboardSource:
-    """A dashboard source that never touches the network."""
-
-    def fetch(self) -> dict:
-        """Return an empty dashboard."""
-        return {}
+def _board_source(slug: str) -> tuple[object, ...]:
+    """Answer the cards of one project slug; these tests hand over no cards."""
+    del slug
+    return ()
 
 
-class FakeUvicornState:
-    """Collect the server double and the stop handlers installed during a test."""
-
-    def __init__(self) -> None:
-        """Start with no server, no recorded handler and a server that stops immediately."""
-        self.servers: list[object] = []
-        self.handlers: dict[int, Callable[[int, object], None]] = {}
-        self.on_run: Callable[[object], None] = lambda server: None
+def _dashboard_source(limit: int) -> tuple[object, ...]:
+    """Answer at most `limit` recent sessions; these tests hand over none."""
+    del limit
+    return ()
 
 
-class ComposedApp:
-    """Stand in for the application main composes, and remember what built it."""
+def _forwarded(call: Any) -> list[Any]:
+    """Return the positional arguments and keyword values of a recorded call in one list.
 
-    def __init__(self) -> None:
-        """Start with no recorded build call."""
-        self.calls: list[tuple[tuple[object, ...], dict[str, object]]] = []
+    Arguments:
+        call: The `call_args` of a mock, or None when the mock was never called.
 
-
-@pytest.fixture
-def db_path(tmp_path: Path) -> Path:
-    """Return a path to a SQLite database inside a temporary directory."""
-    return tmp_path / "rail.sqlite3"
-
-
-@pytest.fixture
-def static_dir(tmp_path: Path) -> Path:
-    """Return an empty directory standing in for the static assets."""
-    path = tmp_path / "static"
-    path.mkdir()
-    return path
+    Returns:
+        Every positional argument followed by every keyword value.
+    """
+    if call is None:
+        return []
+    args, kwargs = call
+    return [*args, *kwargs.values()]
 
 
-@pytest.fixture
-def fake_sources() -> tuple[FakeBoardSource, FakeDashboardSource]:
-    """Return fake board and dashboard sources."""
-    return FakeBoardSource(), FakeDashboardSource()
+def _stub_rail_database(monkeypatch: pytest.MonkeyPatch) -> tuple[MagicMock, MagicMock]:
+    """Replace the rail database and the seen store, so nothing is opened on disk.
+
+    Arguments:
+        monkeypatch: The pytest patcher of the running test.
+
+    Returns:
+        The session-factory stub and the seen-store stub, in that order.
+    """
+    factory = MagicMock(return_value=MagicMock())
+    seen_store = MagicMock()
+    monkeypatch.setattr(rail_app, "session_factory", factory)
+    monkeypatch.setattr(rail_app, "SeenStore", seen_store)
+    return factory, seen_store
 
 
-@pytest.fixture
-def fake_uvicorn(monkeypatch: pytest.MonkeyPatch) -> FakeUvicornState:
-    """Replace uvicorn and the signal registry with doubles that record their calls."""
-    state = FakeUvicornState()
+def test_the_application_built_is_the_one_the_server_module_returns(tmp_path, monkeypatch):
+    artefacts = tmp_path / "artefacts"
+    artefacts.mkdir()
+    application = object()
+    create_app = MagicMock(return_value=application)
+    monkeypatch.setattr(rail_app, "create_app", create_app)
+    _stub_rail_database(monkeypatch)
 
-    class FakeConfig:
-        """A uvicorn configuration double that keeps the application and the options."""
+    built = rail_app.build_app(tmp_path / "rail.sqlite3", artefacts, _board_source, _dashboard_source)
 
-        def __init__(self, app: object, **options: object) -> None:
-            self.app = app
-            self.options = options
-
-    class FakeServer:
-        """A uvicorn server double that reports its run and can be asked to stop."""
-
-        def __init__(self, config: FakeConfig) -> None:
-            self.config = config
-            self.should_exit = False
-            self.ran = False
-            state.servers.append(self)
-
-        def run(self) -> None:
-            self.ran = True
-            state.on_run(self)
-
-    module = SimpleNamespace(Config=FakeConfig, Server=FakeServer)
-    monkeypatch.setattr(rail_app, "uvicorn", module, raising=False)
-    monkeypatch.setattr(uvicorn, "Config", FakeConfig)
-    monkeypatch.setattr(uvicorn, "Server", FakeServer)
-    monkeypatch.setattr(
-        signal,
-        "signal",
-        lambda number, handler: state.handlers.__setitem__(number, handler),
-    )
-    return state
+    assert built is application
+    create_app.assert_called_once()
 
 
-@pytest.fixture
-def composed_app(monkeypatch: pytest.MonkeyPatch) -> ComposedApp:
-    """Replace the real composition so main only has to wire the server."""
-    record = ComposedApp()
+def test_the_board_and_dashboard_sources_reach_the_application_unchanged(tmp_path, monkeypatch):
+    artefacts = tmp_path / "artefacts"
+    artefacts.mkdir()
+    create_app = MagicMock(return_value=object())
+    monkeypatch.setattr(rail_app, "create_app", create_app)
+    _stub_rail_database(monkeypatch)
 
-    def fake_build_app(*args: object, **kwargs: object) -> ComposedApp:
-        record.calls.append((args, kwargs))
-        return record
+    rail_app.build_app(tmp_path / "rail.sqlite3", artefacts, _board_source, _dashboard_source)
 
-    monkeypatch.setattr(rail_app, "build_app", fake_build_app)
-    return record
-
-
-def _compose(
-    db_path: Path,
-    static_dir: Path,
-    sources: tuple[FakeBoardSource, FakeDashboardSource],
-) -> object:
-    """Build the application from the fake sources and the temporary database."""
-    board, dashboard = sources
-    return rail_app.build_app(
-        board_source=board,
-        dashboard_source=dashboard,
-        static_dir=static_dir,
-        db_path=db_path,
-    )
+    forwarded = _forwarded(create_app.call_args)
+    assert _board_source in forwarded
+    assert _dashboard_source in forwarded
 
 
-def test_database_option_is_required_and_the_error_names_it(
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    """A missing --db stops the command line before startup and the message names --db."""
+def test_the_seen_store_is_opened_on_the_rail_database_it_was_given(tmp_path, monkeypatch):
+    artefacts = tmp_path / "artefacts"
+    artefacts.mkdir()
+    monkeypatch.setattr(rail_app, "create_app", MagicMock(return_value=object()))
+    factory, seen_store = _stub_rail_database(monkeypatch)
+    db_path = tmp_path / "rail.sqlite3"
+
+    rail_app.build_app(db_path, artefacts, _board_source, _dashboard_source)
+
+    assert db_path in _forwarded(factory.call_args)
+    assert factory.return_value in _forwarded(seen_store.call_args)
+
+
+def test_a_missing_artefacts_directory_is_rejected_before_the_application_is_built(tmp_path, monkeypatch):
+    create_app = MagicMock(return_value=object())
+    monkeypatch.setattr(rail_app, "create_app", create_app)
+    _stub_rail_database(monkeypatch)
+
+    with pytest.raises(FileNotFoundError):
+        rail_app.build_app(tmp_path / "rail.sqlite3", tmp_path / "absent", _board_source, _dashboard_source)
+
+    create_app.assert_not_called()
+
+
+def test_the_database_option_has_no_default(monkeypatch):
+    run = MagicMock()
+    monkeypatch.setattr(rail_app.uvicorn, "run", run)
+
     with pytest.raises(SystemExit) as exit_info:
-        rail_app.main(["--host", "127.0.0.1", "--port", "8000"])
+        rail_app.main([])
 
-    assert exit_info.value.code != 0
-    message = capsys.readouterr().err
-    assert "--db" in message
-    assert "required" in message.lower()
+    assert exit_info.value.code == 2
+    run.assert_not_called()
 
 
-def test_startup_applies_pending_migrations_to_an_empty_data_directory(
-    db_path: Path,
-    static_dir: Path,
-    fake_sources: tuple[FakeBoardSource, FakeDashboardSource],
-) -> None:
-    """Starting on a data directory that does not exist yet creates the seen table."""
-    app = _compose(db_path, static_dir, fake_sources)
+def test_pending_migrations_run_before_the_server_starts(tmp_path, monkeypatch):
+    steps: list[str] = []
+    application = object()
 
-    with TestClient(app):
-        pass
+    def migrate(*args: Any, **kwargs: Any) -> None:
+        steps.append("migrate")
 
-    with sqlite3.connect(db_path) as connection:
-        tables = {
-            row[0]
-            for row in connection.execute("SELECT name FROM sqlite_master WHERE type = 'table'")
-        }
+    def build(*args: Any, **kwargs: Any) -> object:
+        steps.append("build")
+        return application
 
-    assert "seen" in tables
+    def serve(*args: Any, **kwargs: Any) -> None:
+        steps.append("serve")
 
+    migration = MagicMock(side_effect=migrate)
+    serve_mock = MagicMock(side_effect=serve)
+    monkeypatch.setattr(rail_app, "apply_pending_migrations", migration)
+    monkeypatch.setattr(rail_app, "build_app", MagicMock(side_effect=build))
+    monkeypatch.setattr(rail_app, "VikunjaClient", MagicMock())
+    monkeypatch.setattr(rail_app, "SessionsStore", MagicMock())
+    monkeypatch.setattr(rail_app.uvicorn, "run", serve_mock)
 
-def test_marks_posted_to_the_rail_survive_a_restart_on_the_same_file(
-    db_path: Path,
-    static_dir: Path,
-    fake_sources: tuple[FakeBoardSource, FakeDashboardSource],
-) -> None:
-    """Marks posted to /api/rail are still served after the application is rebuilt on the same file."""
-    first_app = _compose(db_path, static_dir, fake_sources)
-    with TestClient(first_app) as client:
-        response = client.post("/api/rail", json={"marks": ["alpha", "beta"]})
-        assert response.status_code == 200
-        response = client.get("/api/rail")
-    assert response.status_code == 200
-    assert set(response.json()["marks"]) == {"alpha", "beta"}
+    db_path = tmp_path / "rail.sqlite3"
+    code = rail_app.main(["--db", str(db_path)])
 
-    second_app = _compose(db_path, static_dir, fake_sources)
-    with TestClient(second_app) as client:
-        response = client.get("/api/rail")
-
-    assert response.status_code == 200
-    assert set(response.json()["marks"]) == {"alpha", "beta"}
+    assert code == 0
+    assert "migrate" in steps
+    assert "serve" in steps
+    assert steps.index("migrate") < steps.index("serve")
+    assert str(db_path) in [str(value) for value in _forwarded(migration.call_args)]
+    serve_mock.assert_called_once()
+    assert application in _forwarded(serve_mock.call_args)
 
 
-def test_uvicorn_is_handed_the_composed_application_and_run(
-    fake_uvicorn: FakeUvicornState,
-    composed_app: ComposedApp,
-    db_path: Path,
-) -> None:
-    """Main builds the application, hands it to uvicorn, runs it and returns zero."""
-    exit_code = rail_app.main(["--db", str(db_path)])
+@given(argv=st.lists(st.text(max_size=8), max_size=4))
+@settings(max_examples=25, deadline=None, suppress_health_check=[HealthCheck.function_scoped_fixture])
+def test_arguments_without_the_database_option_never_start_the_server(argv, monkeypatch):
+    assume(not any(argument.startswith("-") for argument in argv))
+    run = MagicMock()
+    monkeypatch.setattr(rail_app.uvicorn, "run", run)
+    monkeypatch.setattr(rail_app, "apply_pending_migrations", MagicMock())
 
-    assert exit_code == 0
-    assert len(fake_uvicorn.servers) == 1
-    server = fake_uvicorn.servers[0]
-    assert server.config.app is composed_app
-    assert server.ran is True
+    with pytest.raises(SystemExit) as exit_info:
+        rail_app.main(argv)
 
-    args, kwargs = composed_app.calls[0]
-    assert db_path in [*args, *kwargs.values()]
-
-
-@pytest.mark.parametrize(
-    "stop_signal",
-    [signal.SIGINT, signal.SIGTERM],
-    ids=["sigint", "sigterm"],
-)
-def test_stop_signal_asks_the_server_to_exit_and_the_process_returns_zero(
-    stop_signal: signal.Signals,
-    fake_uvicorn: FakeUvicornState,
-    composed_app: ComposedApp,
-    db_path: Path,
-) -> None:
-    """Delivering SIGINT or SIGTERM to the running server stops it and the process exits zero."""
-
-    def deliver(server: object) -> None:
-        assert stop_signal in fake_uvicorn.handlers
-        fake_uvicorn.handlers[stop_signal](stop_signal, None)
-
-    fake_uvicorn.on_run = deliver
-
-    exit_code = rail_app.main(["--db", str(db_path)])
-
-    assert exit_code == 0
-    assert fake_uvicorn.servers[0].should_exit is True
+    assert exit_info.value.code == 2
+    run.assert_not_called()
