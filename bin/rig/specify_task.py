@@ -35,6 +35,8 @@ from pathlib import Path
 from .plan_task import (
     CONFIG,
     STATE,
+    call_model,
+    call_model_stream,
     extract_json,
     load_keys,
     parse_simple_yaml,
@@ -342,8 +344,6 @@ def main() -> int:
 
     spec_dir_early = STATE / args.project / "specs" / args.subtask
     spec_dir_early.mkdir(parents=True, exist_ok=True)
-
-    from plan_task import call_model, call_model_stream
 
     raw, usage = call_model_stream(cfg, SYSTEM_PROMPT + HOUSE_RULES, user_message)
     (spec_dir_early / "raw.txt").write_text(raw, encoding="utf-8")
