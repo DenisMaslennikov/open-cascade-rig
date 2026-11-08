@@ -12,7 +12,8 @@ from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
-from hypothesis import HealthCheck, given, settings, strategies as st
+from hypothesis import HealthCheck, given, settings
+from hypothesis import strategies as st
 
 from tools.wrapper.rail_server import UnknownProjectError, create_app
 from tools.wrapper.rail_state import CardView

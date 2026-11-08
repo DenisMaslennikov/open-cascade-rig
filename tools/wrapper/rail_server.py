@@ -21,11 +21,10 @@ path (`tools.wrapper.<module>`) with the repository root on `sys.path`.
 
 from __future__ import annotations
 
+import time
 from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Any
-
-import time
 
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse
@@ -90,11 +89,11 @@ def create_app(
             project_cards = cards(request.project)
         except UnknownProjectError:
             raise
-        except Exception as error:  # noqa: BLE001 - the mapping belongs to the error handlers
+        except Exception as error:
             raise UpstreamError("board", str(error)) from error
         try:
             project_sessions = sessions(SESSION_LIMIT)
-        except Exception as error:  # noqa: BLE001 - the mapping belongs to the error handlers
+        except Exception as error:
             raise UpstreamError("dashboard", str(error)) from error
         return rail_payload(project_cards, project_sessions, request.seen, time.time(), request.lang)
 

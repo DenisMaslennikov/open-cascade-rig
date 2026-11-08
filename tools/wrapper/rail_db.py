@@ -11,14 +11,15 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-from alembic import command
 from alembic.config import Config as AlembicConfig
 from sqlalchemy import Float, MetaData, String, create_engine, delete, select
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, sessionmaker
 
+from alembic import command
+
 __all__ = [
-    "Base",
     "RAIL_METADATA",
+    "Base",
     "Seen",
     "SeenMap",
     "SeenStore",
@@ -110,10 +111,7 @@ class SeenStore:
             session.execute(delete(Seen).where(Seen.project == project))
             session.bulk_insert_mappings(
                 Seen,
-                [
-                    {"project": project, "mark": mark, "seen_at": seen_at}
-                    for mark, seen_at in seen.items()
-                ],
+                [{"project": project, "mark": mark, "seen_at": seen_at} for mark, seen_at in seen.items()],
             )
             session.commit()
 

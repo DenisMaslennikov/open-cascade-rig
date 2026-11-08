@@ -7,7 +7,8 @@ from pathlib import Path
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from hypothesis import given, settings, strategies as st
+from hypothesis import given, settings
+from hypothesis import strategies as st
 
 from tools.wrapper.rail_static import mount_static
 
@@ -53,9 +54,7 @@ def test_serves_nested_file_with_its_bytes(static_site: tuple[Path, Path]) -> No
         "/static/..%2foutside.txt",
     ],
 )
-def test_traversal_outside_directory_returns_404(
-    static_site: tuple[Path, Path], request_path: str
-) -> None:
+def test_traversal_outside_directory_returns_404(static_site: tuple[Path, Path], request_path: str) -> None:
     site, _ = static_site
     response = _client(site).get(request_path)
     assert response.status_code == 404

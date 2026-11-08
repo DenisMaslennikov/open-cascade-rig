@@ -7,6 +7,7 @@ never through a declarative ``create_all`` call.
 from __future__ import annotations
 
 import sqlalchemy as sa
+
 from alembic import op
 
 revision: str = "0001"
@@ -14,7 +15,7 @@ down_revision: str | None = None
 branch_labels: None = None
 depends_on: None = None
 
-__all__ = ["downgrade", "down_revision", "revision", "upgrade"]
+__all__ = ["down_revision", "downgrade", "revision", "upgrade"]
 
 
 def upgrade() -> None:

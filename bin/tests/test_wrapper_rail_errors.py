@@ -14,7 +14,7 @@ from pydantic import BaseModel
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "tools" / "wrapper"))
 
-from rail_errors import UpstreamError, UnknownProjectError, install_error_handlers  # noqa: E402
+from rail_errors import UnknownProjectError, UpstreamError, install_error_handlers
 
 
 class _Echo(BaseModel):

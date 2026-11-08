@@ -4,9 +4,8 @@ import sqlite3
 from pathlib import Path
 
 import pytest
-from sqlalchemy import create_engine, text
-
 from rail_db import Base, SeenStore, apply_pending_migrations, session_factory
+from sqlalchemy import create_engine, text
 
 
 @pytest.fixture
@@ -81,10 +80,7 @@ def test_apply_pending_migrations_creates_the_seen_schema_at_revision_0001(db_pa
     apply_pending_migrations(db_path)
 
     with sqlite3.connect(db_path) as connection:
-        tables = {
-            row[0]
-            for row in connection.execute("select name from sqlite_master where type = 'table'")
-        }
+        tables = {row[0] for row in connection.execute("select name from sqlite_master where type = 'table'")}
         version = connection.execute("select version_num from alembic_version").fetchone()
 
     assert "seen" in tables

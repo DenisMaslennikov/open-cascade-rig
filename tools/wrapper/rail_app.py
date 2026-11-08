@@ -14,6 +14,8 @@ path (`tools.wrapper.<module>`) with the repository root on `sys.path`.
 
 from __future__ import annotations
 
+import argparse
+import signal
 import sys
 from collections.abc import Callable, Sequence
 from pathlib import Path
@@ -65,7 +67,28 @@ def build_app(
         FileNotFoundError: `artefacts_dir` is not an existing directory.
         OSError: The rail database cannot be opened.
     """
-    raise NotImplementedError
+    artefacts = Path(artefacts_dir)
+    if not artefacts.is_dir():
+        raise FileNotFoundError(f"the artefacts directory does not exist: {artefacts}")
+    make_session = session_factory(Path(db_path))
+    SeenStore(make_session)
+    return create_app(board_source, dashboard_source, artefacts)
+
+
+def _missing_source(message: str) -> Callable[..., Sequence[object]]:
+    """A source that refuses with an instruction, used when its option was not given.
+
+    Arguments:
+        message: The instruction the caller must read; it names the missing option.
+
+    Returns:
+        A callable raising `RuntimeError` with that message, which the rail answers as `502`.
+    """
+
+    def refuse(*args: object, **kwargs: object) -> Sequence[object]:
+        raise RuntimeError(message)
+
+    return refuse
 
 
 def main(argv: list[str]) -> int:
@@ -85,7 +108,46 @@ def main(argv: list[str]) -> int:
     Raises:
         SystemExit: `--db` is absent or another command-line argument is invalid.
     """
-    raise NotImplementedError
+    parser = argparse.ArgumentParser(
+        prog="rail_app",
+        description="Serve the Hermes wrapper rail: the board's cards and the live chat sessions.",
+    )
+    parser.add_argument("--db", required=True, help="path of the rail's own SQLite database")
+    parser.add_argument(
+        "--artefacts",
+        default=str(Path(__file__).resolve().parent / "rail" / "design"),
+        help="directory holding the rail's static artefacts",
+    )
+    parser.add_argument("--board-url", default=None, help="base URL of the Vikunja board API")
+    parser.add_argument("--dashboard-db", default=None, help="path of the Hermes session database")
+    parser.add_argument("--host", default="127.0.0.1", help="address uvicorn binds to")
+    parser.add_argument("--port", type=int, default=8765, help="port uvicorn binds to")
+    args = parser.parse_args(argv)
+
+    db_path = Path(args.db)
+    apply_pending_migrations(db_path)
+    if args.board_url:
+        cards: Callable[[str], Sequence[CardView]] = VikunjaClient(args.board_url).plan_cards
+    else:
+        print("WARNING: no --board-url: the board source answers 502 until one is given", file=sys.stderr)
+        cards = _missing_source("--board-url is required to read the board")
+    if args.dashboard_db:
+        sessions: Callable[[int], Sequence[SessionRow]] = SessionsStore(Path(args.dashboard_db)).active
+    else:
+        print("WARNING: no --dashboard-db: the dashboard source answers 502 until one is given", file=sys.stderr)
+        sessions = _missing_source("--dashboard-db is required to read the sessions")
+    application = build_app(db_path, Path(args.artefacts), cards, sessions)
+
+    def stop(signum, frame):
+        raise KeyboardInterrupt
+
+    signal.signal(signal.SIGINT, stop)
+    signal.signal(signal.SIGTERM, stop)
+    try:
+        uvicorn.run(application, host=args.host, port=args.port)
+    except KeyboardInterrupt:
+        return 0
+    return 0
 
 
 if __name__ == "__main__":

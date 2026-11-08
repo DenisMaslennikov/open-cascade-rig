@@ -22,7 +22,7 @@ from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
-__all__ = ["UpstreamError", "UnknownProjectError", "install_error_handlers"]
+__all__ = ["UnknownProjectError", "UpstreamError", "install_error_handlers"]
 
 SOURCES: Final[tuple[str, str]] = ("board", "dashboard")
 

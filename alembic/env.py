@@ -15,9 +15,9 @@ import os
 from collections.abc import Mapping
 from pathlib import Path
 
-from alembic import context
 from sqlalchemy import create_engine
 
+from alembic import context
 from tools.wrapper.rail_db import RAIL_METADATA
 
 DB_PATH_OPTION = "db_path"
@@ -35,7 +35,7 @@ __all__ = [
 config = context.config
 
 if config.attributes.get("configure_logger", True):
-    logging.config.fileConfig(config.config_file_name)  # noqa: S321
+    logging.config.fileConfig(config.config_file_name)
 
 target_metadata = RAIL_METADATA
 
@@ -103,9 +103,7 @@ def run_migrations_online() -> None:
     Raises:
         SystemExit: when no database path is configured.
     """
-    connectable = create_engine(
-        _sqlite_url(resolve_database_path(_x_arguments(), os.environ, config.attributes))
-    )
+    connectable = create_engine(_sqlite_url(resolve_database_path(_x_arguments(), os.environ, config.attributes)))
 
     with connectable.connect() as connection:
         context.configure(connection=connection, target_metadata=RAIL_METADATA)
