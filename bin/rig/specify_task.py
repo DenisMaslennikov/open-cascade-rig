@@ -44,8 +44,15 @@ from .plan_task import (
     token_limit,
 )
 from .rig_conf import gateway
+from .validate_plan import SRC_PREFIXES, TESTS_PREFIXES, classify
 
 BIN = Path(__file__).resolve().parent
+
+# Read from the plan alphabet rather than restated here: #191 moved the rig's own sources from `bin/`
+# to `bin/rig/` and the specifier kept rejecting every stub outside `src/`, which is why card #203's
+# first stub pass died on `a stub must live under src/`.
+SOURCE_DIRS = ", ".join(SRC_PREFIXES)
+TEST_DIRS = ", ".join(TESTS_PREFIXES)
 
 HOUSE_RULES = """
 HOUSE RULES (from the project owner, binding for every role):
@@ -69,10 +76,13 @@ Answer with exactly one JSON object and nothing else:
 Hard rules:
 - A `kind: "stub"` path comes from the subtask's `files_allowed` list. No other source file may be
   produced.
-- A `kind: "test"` path is derived deterministically from a stub: replace the leading
-  `<contour>/src/` with `<contour>/tests/unit/` and prefix the module name with `test_`
+- A `kind: "test"` path comes from the tests the plan already froze for this subtask, or — only for a
+  src-layout project — is derived deterministically from a stub: replace the leading `<contour>/src/`
+  with `<contour>/tests/unit/` and prefix the module name with `test_`
   (`backend/src/app/domain/skills/sp.py` -> `backend/tests/unit/domain/skills/test_sp.py`).
-  One test file per stub module, all stubs covered.
+  One test file per stub module, all stubs covered. When the plan names the test files (a repository
+  whose tests live under `bin/tests/` or `tools/<name>/tests/`), use exactly those paths; do not
+  invent a mirrored one.
 - When a stub file already exists, keep its existing code verbatim (imports may be extended,
   `__all__` extended) and add only the signatures this subtask introduces. Never drop a function
   that already has a real implementation.
@@ -189,7 +199,12 @@ def write_files(
 ) -> tuple[bool, list[str]]:
     errors: list[str] = []
     normalized = [a.rstrip("/") for a in allowed]
-    expected_tests = {derived_test_path(a) for a in allowed if "/src/" in f"/{a}"}
+    # The mirrored `tests/unit/...` path is a src-layout convention. Other layouts name their tests
+    # explicitly in the plan (`plan_tests`), and for them the mirror would be a wrong path, not a hint.
+    src_layout = ("src/", "app/", "lib/", "pkg/")
+    expected_tests = {
+        derived_test_path(a) for a in allowed if any(classify(a).startswith(p) for p in src_layout)
+    }
     expected_tests |= set(plan_tests or ())
     for item in files:
         path = (item.get("path") or "").strip()
@@ -206,19 +221,29 @@ def write_files(
         )
         if kind == "test":
             stem_ok = any(path.endswith(f"test_{Path(a).stem}.py") for a in allowed)
-            under_tests = "/tests/" in f"/{path}" or path.startswith("tests/")
-            if path not in expected_tests and not (stem_ok and under_tests):
+            under_tests = classify(path).startswith(TESTS_PREFIXES)
+            if plan_tests:
+                # The plan froze these tests; inventing a second home for them is how a suite grows a
+                # copy that nobody runs (the `tests/unit` mirror of a `tools/` stub is exactly that).
+                if path not in expected_tests:
+                    errors.append(
+                        f"{path}: the plan froze no such test file; expected one of {sorted(expected_tests)}"
+                    )
+                    continue
+            elif path not in expected_tests and not (stem_ok and under_tests):
                 errors.append(f"{path}: a test must live at one of {sorted(expected_tests)}")
                 continue
             inside = True
         if not inside:
             errors.append(f"{path}: outside files_allowed {allowed}")
             continue
-        if kind == "test" and "/tests/" not in f"/{path}":
-            errors.append(f"{path}: a test file must live under tests/")
+        if kind == "test" and not classify(path).startswith(TESTS_PREFIXES):
+            errors.append(f"{path}: a test file must live under {TEST_DIRS}")
             continue
-        if kind == "stub" and "/src/" not in f"/{path}":
-            errors.append(f"{path}: a stub must live under src/")
+        if kind == "stub" and not (
+            classify(path).startswith(SRC_PREFIXES) and not classify(path).startswith(TESTS_PREFIXES)
+        ):
+            errors.append(f"{path}: a stub must live under {SOURCE_DIRS}")
             continue
         extending = (worktree / path).exists()  # an extension keeps real code, it is not a stub
         is_error_module = "Error(" in content and "NotImplementedError" not in content
