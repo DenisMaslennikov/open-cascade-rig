@@ -22,6 +22,14 @@ observed in this rig within a day of the first import.
   choice. `bin/config_init.py --materialize --project <slug>` copies it to
   `~/.config/cascade/projects/<slug>.yaml` if that file does not exist yet.
 
+## Model blacklist
+
+`models-blacklist.yaml` in this directory is the canonical list of models the pipeline must never be
+configured to use; each entry names the model and the reason it is forbidden. `check_project` reads
+the list and refuses a project whose roles carry a blacklisted model, the same way it refuses one
+with an unset role. Adding or lifting an entry is a pull request to that file, with the reason on the
+entry so the next reader does not have to rediscover why the model is off the table.
+
 ## When a model changes
 
 1. Measure it (`playbook/costs.md`), record the run in `evidence/`.
