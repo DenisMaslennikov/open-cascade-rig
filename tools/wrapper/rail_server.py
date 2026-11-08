@@ -24,7 +24,7 @@ from __future__ import annotations
 import time
 from collections.abc import Callable, Sequence
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse
@@ -47,13 +47,15 @@ class RailRequest(BaseModel):
 
     project: str = Field(min_length=1)
     seen: dict[str, float] = Field(default_factory=dict)
-    lang: str = Field(default="en")
+    # A `Literal` is the cheapest 400: FastAPI's validation error reaches the handler that answers it.
+    lang: Literal["en", "ru"] = "en"
 
 
 def create_app(
     cards: CardsSource,
     sessions: SessionsSource,
     static_dir: Path,
+    seen_store: Any | None = None,
 ) -> FastAPI:
     """Build the rail's FastAPI application around the injected sources and static directory.
 
@@ -95,6 +97,8 @@ def create_app(
             project_sessions = sessions(SESSION_LIMIT)
         except Exception as error:
             raise UpstreamError("dashboard", str(error)) from error
+        if seen_store is not None:
+            seen_store.store_seen(request.project, request.seen)
         return rail_payload(project_cards, project_sessions, request.seen, time.time(), request.lang)
 
     @app.get("/{file_path:path}", include_in_schema=False)

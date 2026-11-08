@@ -42,9 +42,10 @@ def _resolve_inside(root: Path, file_path: str) -> Path | None:
     The request path is percent-decoded first, because a client may send an encoded traversal,
     and the result is resolved so a symbolic link is followed before containment is checked.
     """
-    candidate = (root / urllib.parse.unquote(file_path)).resolve()
     try:
+        candidate = (root / urllib.parse.unquote(file_path)).resolve()
         candidate.relative_to(root)
-    except ValueError:
+    except (ValueError, OSError):
+        # A NUL byte or a symlink loop makes `resolve` raise; both are "no such file", never a 500.
         return None
     return candidate if candidate.is_file() else None

@@ -24,9 +24,12 @@ import uvicorn
 from fastapi import FastAPI
 
 from tools.wrapper.rail_db import SeenStore, apply_pending_migrations, session_factory
+from tools.wrapper.rail_errors import UnknownProjectError
 from tools.wrapper.rail_server import create_app
 from tools.wrapper.rail_state import CardView
 from tools.wrapper.sessions_store import SessionRow, SessionsStore
+from tools.wrapper.vikunja_client import Card as VikunjaCard
+from tools.wrapper.vikunja_client import UnknownProject as VikunjaUnknownProject
 from tools.wrapper.vikunja_client import VikunjaClient
 
 __all__ = [
@@ -40,6 +43,52 @@ __all__ = [
     "session_factory",
     "uvicorn",
 ]
+
+
+def card_views(cards: Sequence[VikunjaCard]) -> list[CardView]:
+    """Translate the board client's cards into the rail's view of a card.
+
+    The client speaks `vikunja_client.Card` (`labels` is a tuple of `Label` objects); the rail speaks
+    `rail_state.CardView` (`labels` is a tuple of `(title, colour)` pairs). Without this translation the
+    first real card crashed `rail_payload` with `TypeError: 'Label' object is not iterable`, outside the
+    try blocks, so the client saw a 500 for every request.
+
+    Arguments:
+        cards: Cards as the Vikunja client returns them.
+
+    Returns:
+        The same cards as `CardView` instances, in the same order.
+    """
+    return [
+        CardView(
+            id=card.id,
+            title=card.title,
+            labels=tuple((label.title, label.colour) for label in card.labels),
+            blocked=card.blocked,
+            url=card.url,
+        )
+        for card in cards
+    ]
+
+
+def board_reader(client: VikunjaClient) -> Callable[[str], Sequence[CardView]]:
+    """Bind a board client to the rail's cards-source contract.
+
+    Arguments:
+        client: The board client the process was configured with.
+
+    Returns:
+        A callable answering `CardView` rows, raising `UnknownProjectError` for a slug the board does
+        not know — the error the rail answers with `400`, not the `502` a failing upstream gets.
+    """
+
+    def read(project: str) -> Sequence[CardView]:
+        try:
+            return card_views(client.plan_cards(project))
+        except VikunjaUnknownProject as error:
+            raise UnknownProjectError(str(error)) from error
+
+    return read
 
 
 def build_app(
@@ -71,8 +120,8 @@ def build_app(
     if not artefacts.is_dir():
         raise FileNotFoundError(f"the artefacts directory does not exist: {artefacts}")
     make_session = session_factory(Path(db_path))
-    SeenStore(make_session)
-    return create_app(board_source, dashboard_source, artefacts)
+    seen_store = SeenStore(make_session)
+    return create_app(board_source, dashboard_source, artefacts, seen_store)
 
 
 def _missing_source(message: str) -> Callable[..., Sequence[object]]:
@@ -127,7 +176,7 @@ def main(argv: list[str]) -> int:
     db_path = Path(args.db)
     apply_pending_migrations(db_path)
     if args.board_url:
-        cards: Callable[[str], Sequence[CardView]] = VikunjaClient(args.board_url).plan_cards
+        cards: Callable[[str], Sequence[CardView]] = board_reader(VikunjaClient(args.board_url))
     else:
         print("WARNING: no --board-url: the board source answers 502 until one is given", file=sys.stderr)
         cards = _missing_source("--board-url is required to read the board")
