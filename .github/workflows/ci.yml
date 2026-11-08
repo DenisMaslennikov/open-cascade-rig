@@ -20,9 +20,11 @@ jobs:
       # The suite lives under bin/ with the modules (card #191): `bin/tests`, run from `bin`, so the
       # `rig` package resolves without a `pythonpath` setting.
       - name: Tests
+        # Coverage is reported, not enforced: the threshold comes from measured statistics, and the
+        # number in the log is the only claim about "what is covered" this repository makes.
         run: |
           if [ -n "$(find bin/tests -name 'test_*.py' 2>/dev/null)" ]; then
-            cd bin && python -m pytest
+            cd bin && python -m pytest --cov=rig --cov=tools --cov-report=term-missing:skip-covered
           else
             echo "no tests yet — the coverage card is still open"
           fi

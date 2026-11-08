@@ -4,8 +4,15 @@ When to read: before writing or editing tests, and before diagnosing a failing o
 
 ## Where and how
 
-- `bin/tests/` mirrors `bin/rig/`: `bin/rig/prices_openrouter.py` → `bin/tests/test_prices_openrouter.py`.
-  The suite lives with the modules; it is run from `bin` (`cd bin && python3 -m pytest`).
+- Tests live in the **feature's own `tests/` folder**, next to the code they test:
+  `bin/rig/gate.py` → `bin/tests/test_gate.py`, `tools/wrapper/rail_db.py` →
+  `tools/wrapper/tests/test_rail_db.py`. The plan names the test files; nothing derives a test path
+  from a source file name, and a `tests/unit/...` mirror of a source tree is not created.
+- **Unit tests only for now.** A test that needs the network, a real database file or a running server
+  is not part of a subtask; it waits for the card that owns integration.
+- What is covered is a **measurement**: `coverage` through `pytest-cov` (`make cov`). It is reported,
+  not enforced — a threshold has to come from measured statistics, and a claim that "this is covered"
+  is backed by the report, never by the presence of a file with a matching name.
 - No network, no real gateway, no real git remote in a unit test: subprocess and `urllib` are patched
   at the boundary. A test that needs the internet is an integration test and belongs in its own file.
 - A test name states the behaviour (`test_reports_direct_connection_when_no_proxy_is_configured`), not

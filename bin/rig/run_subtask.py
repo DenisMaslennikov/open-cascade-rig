@@ -33,7 +33,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from .plan_task import CONFIG, STATE, load_keys, parse_simple_yaml, token_limit
-from .rig_conf import gateway
+from .rig_conf import app_root, gateway
 
 BIN = Path(__file__).resolve().parent
 
@@ -371,7 +371,7 @@ def main() -> int:
         frozen = gate("frozen-tests", repo=str(worktree), base=base, tests_prefix="backend/tests/")
         rel_tests = [p.split("backend/", 1)[-1] if p.startswith("backend/") else p for p in (task.get("tests") or [])]
         cmd = f"{args.python} -m pytest {' '.join(rel_tests)} -q"
-        passing = gate("expect-pass", repo=str(worktree / "backend"), cmd=cmd)
+        passing = gate("expect-pass", repo=str(app_root(worktree)), cmd=cmd)
         attempt_rows.append(
             {
                 "attempt": number,
@@ -421,7 +421,7 @@ def main() -> int:
         else:
             result["error"] = commit.stderr.strip()[:400]
 
-    full = gate("expect-pass", repo=str(worktree / "backend"), cmd=f"{args.python} -m pytest -q")
+    full = gate("expect-pass", repo=str(app_root(worktree)), cmd=f"{args.python} -m pytest -q")
     result["full_suite"] = {"ok": full.get("ok"), "tail": full.get("tail")}
     record_usage(args.project, args.feature or args.subtask, args.subtask, model, total_usage)
 

@@ -26,7 +26,7 @@ import sys
 from datetime import UTC, datetime
 from pathlib import Path
 
-from .plan_task import CONFIG, STATE, load_keys, parse_simple_yaml
+from .plan_task import CONFIG, STATE, call_model_stream, extract_json, load_keys, parse_simple_yaml
 from .rig_conf import gateway, project_config
 
 BIN = Path(__file__).resolve().parent
@@ -202,7 +202,6 @@ def ask_human_checks(cfg: dict, review_markdown: str) -> tuple[list[str], dict]:
     Answered in Russian: this list is read by the owner, not by another model, so it is a
     human-facing summary, not a pipeline artefact.
     """
-    from plan_task import call_model_stream, extract_json
 
     prompt = (
         "Below is a code review produced by a reviewer. List 3 to 5 points that a human must check "

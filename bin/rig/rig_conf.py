@@ -118,3 +118,14 @@ def rig_repo(explicit: str | None = None) -> Path:
     if configured:
         return Path(configured).expanduser()
     return Path.cwd()
+
+
+def app_root(worktree: Path) -> Path:
+    """Where the gates run inside a worktree: the `backend/` contour when there is one, else the root.
+
+    A monorepo keeps the application under `backend/`; this repository keeps it at the root. Both are
+    legitimate, so the gates ask instead of assuming — the assumption is what made the specifier run its
+    red gate in a directory that does not exist.
+    """
+    candidate = worktree / "backend"
+    return candidate if candidate.is_dir() else worktree
