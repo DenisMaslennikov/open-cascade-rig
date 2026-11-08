@@ -49,6 +49,11 @@ def ledger_path(project: str) -> Path:
     return STATE / project / "usage.jsonl"
 
 
+def project_dirs() -> list[str]:
+    """Project names in STATE, one per distinct ledger directory: a symlink alias folds into the real name."""
+    return [d.name for d in sorted({p.resolve() for p in STATE.iterdir() if p.is_dir()})]
+
+
 def load_keys() -> dict[str, str]:
     out: dict[str, str] = {}
     env = CONFIG / "keys.env"
@@ -144,9 +149,9 @@ def fmt(block: dict) -> str:
 
 
 def cmd_report(a: argparse.Namespace) -> int:
-    projects = [a.project] if a.project else [p.name for p in STATE.iterdir() if p.is_dir()] if STATE.exists() else []
+    projects = [a.project] if a.project else project_dirs() if STATE.exists() else []
     if a.all:
-        projects = [p.name for p in STATE.iterdir() if p.is_dir()]
+        projects = project_dirs()
     if not projects:
         print("нет данных", file=sys.stderr)
         return 1
@@ -198,10 +203,9 @@ def cmd_projects(_: argparse.Namespace) -> int:
     if not STATE.exists():
         print("нет данных")
         return 0
-    for p in sorted(STATE.iterdir()):
-        if p.is_dir():
-            n = len(read_events(p.name))
-            print(f"{p.name:<24} событий: {n}")
+    for name in project_dirs():
+        n = len(read_events(name))
+        print(f"{name:<24} событий: {n}")
     return 0
 
 

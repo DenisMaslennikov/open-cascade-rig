@@ -1,0 +1,5 @@
+# A model on this list must never be configured for a role in any project: the cascade refuses to run it.
+# bin/rig/check_project.py enforces the list — a project whose roles carry a listed model fails its check.
+models:
+  - model: qwen/qwen3-coder-next
+    reason: its runs were abandoned twice on a large diff

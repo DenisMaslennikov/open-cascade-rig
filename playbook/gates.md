@@ -3,7 +3,8 @@
 **When to read:** before freezing tests, before running the executor, and whenever a check is green
 for a reason you did not predict.
 
-The gates are deterministic (`bin/rig/gate.py`) and answer four questions:
+The gates are deterministic (`bin/rig/gate.py`, run as `cd bin && python3 -m rig gate <command> …`) and
+answer four questions:
 
 - `check-diff` — is every changed file inside the subtask's `files_allowed`?
 - `frozen-tests` — did the executor touch the tests it was supposed to make pass?
@@ -17,7 +18,7 @@ An `ImportError` is not a red gate: it proves the tests cannot run, not that the
 The stub must exist and raise `NotImplementedError`.
 
 Observed on this rig: a plan that split tests and implementation into two subtasks produced no stubs
-at all — `specify_task.py` only emits files listed in *that* subtask's `files_allowed` — so the red
+at all — `rig.specify_task` only emits files listed in *that* subtask's `files_allowed` — so the red
 gate was green on `ImportError`. Remedy: run a specifier pass over the implementation files that adds
 stubs raising `NotImplementedError`, then the same gate is red for the right reason.
 

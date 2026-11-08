@@ -37,6 +37,7 @@ from .plan_task import CONFIG, STATE, load_keys, parse_simple_yaml, token_limit
 from .rig_conf import gateway
 
 BIN = Path(__file__).resolve().parent
+PKG_ROOT = BIN.parent
 
 OH_VENV = Path.home() / "soft" / "openhands" / ".venv"
 BIN_PY = OH_VENV / "bin" / "python"
@@ -163,6 +164,51 @@ def changed_files(worktree: Path, base: str | None = None) -> list[str]:
     return sorted({p.strip() for p in (*tracked, *staged, *untracked, *committed) if p.strip()})
 
 
+def settle_worktree(worktree: Path, base: str, verify_ok: bool, message: str, author: str | None = None) -> dict:
+    """Settle a finished run into a commit that resolves, or into a non-empty reason.
+
+    A run ends in exactly one of three states: the work is uncommitted and gets committed here with
+    `message`; the role committed its own work (the briefs ask it to), the tree is clean and the
+    commits between `base` and HEAD are the work, so that HEAD settles the run without a new commit;
+    or there is nothing to settle — a failed acceptance or an untouched tree — and the run fails with
+    a reason. A commit refused by hooks reports whatever git printed, verbatim.
+
+    Arguments: `worktree` is the repository the role worked in, `base` is the HEAD the run started
+    from, `verify_ok` says the acceptance command passed, `message` is the commit message for
+    uncommitted work, `author` is the `user.name` of the commit this function creates (default
+    `cascade`, since a commit the rig makes on its own behalf is not one role's work). Returns
+    {"commit": sha|None, "ok": bool, "error": str|None}; `ok` is False
+    only with a non-empty `error` and never with a commit, and True only with `commit` equal to the
+    worktree's HEAD after the call.
+    """
+    if not verify_ok:
+        return {
+            "commit": None,
+            "ok": False,
+            "error": "acceptance failed; the worktree is left as the role left it, nothing is committed",
+        }
+
+    if git(worktree, "status", "--porcelain").stdout.strip():
+        git(worktree, "add", "-A")
+        commit = git(
+            worktree,
+            "-c",
+            f"user.name={author or 'cascade'}",
+            "-c",
+            "user.email=cascade@localhost",
+            "commit",
+            "-m",
+            message,
+        )
+        if commit.returncode != 0:
+            return {"commit": None, "ok": False, "error": (commit.stderr or commit.stdout).strip()[:400]}
+
+    head = git(worktree, "rev-parse", "HEAD").stdout.strip()
+    if base and head != base:
+        return {"commit": head, "ok": True, "error": None}
+    return {"commit": None, "ok": False, "error": "nothing to settle: the worktree is unchanged since the base"}
+
+
 def metrics_of(conversation) -> dict:
     try:
         snapshot = conversation.conversation_stats.get_combined_metrics()
@@ -181,7 +227,8 @@ def metrics_of(conversation) -> dict:
 def record_usage(slug: str, role: str, model: str, usage: dict) -> None:
     cmd = [
         sys.executable,
-        str(BIN / "usage.py"),
+        "-m",
+        "rig.usage",
         "record",
         "-p",
         slug,
@@ -202,7 +249,12 @@ def record_usage(slug: str, role: str, model: str, usage: dict) -> None:
     ]
     if usage.get("cache_read_tokens"):
         cmd += ["--cache-read", str(usage["cache_read_tokens"])]
-    subprocess.run(cmd, capture_output=True, text=True)
+    # A lost cost record must stay visible: name the ledger and let the child say why it failed.
+    proc = subprocess.run(cmd, capture_output=True, text=True, cwd=PKG_ROOT)
+    if proc.returncode != 0:
+        ledger = STATE / slug / "usage.jsonl"
+        reason = (proc.stderr or proc.stdout).strip() or "the usage tool produced no output"
+        print(f"WARNING: usage ledger not updated ({ledger}): {reason}", file=sys.stderr)
 
 
 def gateway_prices(model: str) -> dict[str, float] | None:
@@ -587,23 +639,16 @@ def main() -> int:
         verify = {"command": args.verify, "exit": proc.returncode, "tail": (proc.stdout + proc.stderr)[-1500:]}
         result["verify"] = verify
 
-    if changed and (verify is None or verify["exit"] == 0):
-        git(worktree, "add", "-A")
-        commit = git(
-            worktree,
-            "-c",
-            "user.name=cascade-" + args.role,
-            "-c",
-            "user.email=cascade@localhost",
-            "commit",
-            "-m",
-            f"{args.role}: {request.strip().splitlines()[0][:80]}",
-        )
-        if commit.returncode == 0:
-            result["commit"] = git(worktree, "rev-parse", "HEAD").stdout.strip()
-            result["ok"] = True
-        else:
-            result["error"] = commit.stderr.strip()[:400]
+    settled = settle_worktree(
+        worktree,
+        base,
+        verify is None or verify["exit"] == 0,
+        f"{args.role}: {request.strip().splitlines()[0][:80]}",
+        author=f"cascade-{args.role}",
+    )
+    result["commit"] = settled["commit"]
+    result["ok"] = settled["ok"]
+    result["error"] = settled["error"]
 
     record.update({"state": "done" if result["ok"] else "failed", "result": result})
     record_path.write_text(json.dumps(record, ensure_ascii=False, indent=1), encoding="utf-8")

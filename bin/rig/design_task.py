@@ -46,6 +46,7 @@ from .plan_task import (
 from .rig_conf import gateway
 
 BIN = Path(__file__).resolve().parent
+PKG_ROOT = BIN.parent
 
 SYSTEM_PROMPT = """You are the designer of an automated development pipeline.
 
@@ -160,7 +161,8 @@ def design_context(worktree: Path) -> str:
 def record_usage(slug: str, feature: str, model: str, usage: dict) -> None:
     cmd = [
         sys.executable,
-        str(BIN / "usage.py"),
+        "-m",
+        "rig.usage",
         "record",
         "-p",
         slug,
@@ -181,7 +183,7 @@ def record_usage(slug: str, feature: str, model: str, usage: dict) -> None:
     ]
     if (usage.get("prompt_tokens_details") or {}).get("cached_tokens"):
         cmd += ["--cache-read", str(usage["prompt_tokens_details"]["cached_tokens"])]
-    subprocess.run(cmd, capture_output=True, text=True)
+    subprocess.run(cmd, capture_output=True, text=True, cwd=PKG_ROOT)
 
 
 def never_copy(worktree: Path) -> list[str]:

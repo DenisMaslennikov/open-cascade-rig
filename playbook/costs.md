@@ -40,22 +40,45 @@ openrouter.ai is answered with 403 from this host.
 
 ## Procedure
 
-- Record every call: `bin/rig/usage.py record ...` writes to the project ledger; nothing is "closed" until
-  its cost is recorded.
-- Report per phase: `bin/rig/usage.py report -p <project> [--feature F] [--task T] [--json]`, or
-  `cd bin && python3 -m rig.prices_openrouter --report` for a priced view.
+- Record every call: `cd bin && python3 -m rig.usage record …` writes to the project ledger; nothing
+  is "closed" until its cost is recorded.
+- Report per phase: `cd bin && python3 -m rig.usage report -p <project> [--feature F] [--task T]
+  [--json]`, or `cd bin && python3 -m rig.prices_openrouter --report` for a priced view.
+- The **run report carries two tables, and both are produced by the tool, never by hand**:
+
+  ```
+  cd bin && python3 -m rig.cost_report --project <slug> --days N
+  ```
+
+  Table 1 is the **successful runs** — a run record that reached `done`. Table 2 is the **failed
+  attempts** — records that hung, were killed or ended `failed`, plus the window's ledger spend that
+  no successful run explains. Both tables carry the same columns: role | model | input tokens |
+  output tokens | cache-read tokens | cost at the gateway's prices | cost at OpenRouter list prices.
+- Success and failure are read from `record.json` (`state == "done"`, plus the `result.usage` block),
+  **not** from whether the worktree changed. A run that wrote files and was killed is a failed
+  attempt, and a run that changed nothing and exited `done` is a success.
+- **The gateway column is for the owner's eyes only.** The repository, the commits and the PR body
+  carry OpenRouter list prices and nothing else — the gateway's overrides are 30–70x the list price
+  and quoting them produced the "$93 for a day" figure.
+- In a **PR body** the cost table names its source in the column header — `Cost, $ (OpenRouter
+  list)` — and its caption names the catalogue snapshot date (`pricing-openrouter.json`,
+  `fetched_at`) and says this is the list price, not the gateway invoice. The numbers must match
+  `cd bin && python3 -m rig.prices_openrouter --report --project <slug> --days <window>` for the
+  card's window.
 - Put the cost into the commit body of the task: tokens per role and model, and the OpenRouter-based
-  cost with the source named. Give the owner the same list in the chat and in Telegram, including a
-  separate line for wasted iterations.
+  cost with the source named. The owner gets the same numbers in the chat and in Telegram, including
+  the failed-attempts table — see `reporting.md` for what the report says and in which language.
 
 ## Traps
 
 - **A budget in the agent runtime is not a budget in money you expect.** The runtime prices tokens with
   the gateway's per-model numbers, which can be far above the list price; a budget that looks absurdly
   large may still abort a run, and a budget that looks small may allow a very expensive one.
-- **Retry loops are invisible in the ledger until they finish.** A run killed by budget records usage; a
-  run killed by hand often does not. Check `state/…/roles/<role>/<ts>/record.json`, not only the ledger.
+- **Read success and failure from `record.json`, not from the worktree.** A hand-killed run often has
+  no ledger lines at all until it is killed, and ledger lines alone cannot tell a success from a
+  failure — `state/…/roles/<role>/<ts>/record.json` is the only source of `state`. The failed table of
+  `rig.cost_report` exists so that this check is a command, not a memory exercise.
 - Reasoning models spend output budget on thinking: an empty answer at `finish_reason=length` is a cost
   problem, not a broken gateway.
-- Cache reads are not priced in the reports — OpenRouter does not publish a per-route cache rate, and
-  inventing one would make the total look better than it is.
+- Cache reads are counted but not priced in any table — OpenRouter does not publish a per-route cache
+  rate, and inventing one would make the total look better than it is.

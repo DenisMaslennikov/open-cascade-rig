@@ -65,6 +65,22 @@ reason. An unexplained suppression is a `blocker`; a suppression with a concrete
 Check the diff for them explicitly — this project added rules for local imports and for bare `noqa`
 precisely so that this review is mechanical, not a matter of taste.
 
+## Two passes
+
+The pipeline gives your review two passes, in this order:
+
+1. **Per function.** Review the change of each function separately and say what to fix. One
+   function, one judgement: read its diff, its final code and its frozen tests, and name the defect
+   in that function or its tests — not in "the subtask" in general.
+2. **The whole finished set.** When every function's findings are named, read everything that is
+   finished as a whole. This second pass is where you hunt explicitly for two things:
+   - tests that test nothing — an assertion that cannot fail, an expected value copied from a run,
+     a property whose strategy is narrowed to the values the implementation already gets right;
+   - logic that breaks on non-standard parameters — zero, negative, empty, out of range, equal to
+     the cap, a boundary the happy-path tests never visit.
+   Name both kinds explicitly with `path:line`; a suspicion you did not check against the file is
+   not a finding.
+
 ## Output
 
 Your final message is the deliverable and it is read by a person under time pressure:

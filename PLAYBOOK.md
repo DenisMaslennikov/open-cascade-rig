@@ -9,6 +9,7 @@ symptoms — a trap without a symptom is a mood, not knowledge.
 | `playbook/gates.md` | `check-diff`, `frozen-tests`, `expect-fail`, `expect-pass` | freezing tests, running the executor |
 | `playbook/board.md` | the Kanban as the status tool: columns, archive, the done-bucket trap | every phase transition |
 | `playbook/review-loop.md` | two reviewers, read-only review, the fix loop, escalation | before any review |
+| `playbook/reporting.md` | the task report after a card: chat and Telegram, in Russian, tests as coverage | when a card is done |
 | `playbook/costs.md` | what a run costs and why, how to price a phase, how to record it | before a run that costs money |
 | `playbook/model-behaviour.md` | what each model actually does inside a loop | routing work to a model |
 | `playbook/ci-and-runners.md` | hooks, self-hosted runner, who may run what | touching CI |

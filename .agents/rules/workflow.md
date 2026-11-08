@@ -4,10 +4,14 @@ When to read: before starting any task, and before opening a pull request.
 
 ## Branches and merge
 
-- `main` — through pull requests only: squash, linear history. **A human merges; never an agent, a
-  bot or a scheduled job.** In a single-owner repository the author cannot approve their own pull
-  request, so an approval counter would only ever be bypassed by an administrator merge. The
-  human-only merge plus a visible reviewer report replace the counter.
+- `main` — through pull requests only: squash, linear history. **A human merges into `main`; never an
+  agent, a bot or a scheduled job.** The pull request a human merges is the final feature pull request,
+  `feat/<slug>` into `main`, which carries the whole card; this is the only merge that waits for him.
+  A `task/<feature>/<id>` merge into `feat/<slug>` is the pipeline's own business — agent review with
+  no open blocking finding plus green gates — and the owner is not asked for it. In a single-owner
+  repository the author cannot approve their own pull request, so an approval counter would only ever
+  be bypassed by an administrator merge. The human-only merge plus a visible reviewer report replace
+  the counter.
 - `feat/<slug>` — an integration branch for a larger change; lives at most a week.
 - `task/<feature>/<id>` — atomic subtasks; their pull request targets `feat/*`, never `main`.
 - Never rewrite published history. `pre-push` refuses it; the repository ruleset refuses it again.
@@ -39,26 +43,41 @@ answered.
 
 ## Tech debt
 
-Debt is not accumulated. A gap or a defect found while doing a task is **fixed in that task** if it can
-be fixed there — same card, same pull request, same review. Finding a problem and writing it down for
-"later" is the expensive option, not the safe one: the next reader pays again, and the branch that
-would have carried the fix is already merged.
+Debt is not accumulated. A defect found while doing a task is fixed **right here, right now** — same
+card, same pull request, same review — whenever the fix does not need a large-scale change: a broken
+path, a missing gate, a false failure of a script. Such a fix is made immediately, in the branch that
+is open, without asking. Finding a problem and writing it down for "later" is the expensive option, not
+the safe one: the next reader pays again, and the branch that would have carried the fix is already
+merged.
 
-Ask the human, before finishing the task, when the fix cannot live in it:
+Ask the human, before finishing the task, when the fix cannot live in the current task — above all when
+it would touch many files, because a change that spreads across the repository is no longer "here and
+now"; also when it changes a contract, a schema or a rule another task depends on, or needs a decision
+the task does not own. The ask proposes the card and states what the defect is, why it cannot be fixed
+inside the current task, the options with a recommendation first, and what happens if it is left alone.
+Send the ask where an answer can actually arrive — the chat, and Telegram when someone is there to read
+it; a question nobody will read is a question not asked, so when the channel cannot answer, ask in the
+chat only.
 
-- it changes a contract, a schema or a rule another task depends on;
-- it needs a decision the task does not own (a library, an architecture, a vendor boundary);
-- it is larger than the task's budget of attempts or time.
-
-The ask states the problem, the options with a recommendation first, and what happens if it is left
-alone. Do not invent a card to avoid asking, and do not silently defer: a card is the record of a
-decision the human made, not a licence to leave work undone.
+A card is created **only with the human's permission**. Writing a card to avoid work is the failure
+mode, and so is silently dropping the finding: a card is the record of a decision the human made, not a
+licence to leave work undone.
 
 When debt is deliberately deferred by that decision, it must be visible, not silent:
 
 - the gate prints it (a `WARNING` rule, an ignore with the reason in the same line), and
 - the card that removes it is named where the suppression lives (`Card #NNN`), so deleting the
   suppression is a measurable task rather than a memory.
+
+Traps, and what they look like from outside:
+
+- a TODO or a follow-up card written instead of a fix — the defect ships, and the "later" card outlives
+  the memory of why it was opened;
+- a finding dropped without a decision — nobody decided anything, and the same defect re-surfaces on
+  the next branch;
+- a small fix waiting on a question — a one-line correction idles while a conversation could have been
+  skipped;
+- the ask sent into a channel that cannot answer — the task stalls on an answer that was never coming.
 
 ## Cards
 
@@ -67,6 +86,71 @@ When debt is deliberately deferred by that decision, it must be visible, not sil
 3. A card that cannot be taken yet is blocked by the card that unblocks it — a pull request in flight
    blocks its card until it is merged, because work against unmerged code is work against a guess.
 4. Nothing is "done" until the pull request is merged, the board says so, and the cost is on the card.
+
+### The architect runs on every card
+
+- **Every card is decomposed by the architect before any test or code is written.** The architect
+  turns the business requirement into functions, logic and file locations; the specifier freezes the
+  tests from that plan; the executor writes the code inside the paths the plan named.
+- A card that arrives already split into "points" — an urgent-fixes card, a bug list — still goes
+  through the architect: the points are the input, the decomposition and the placement are its output.
+- The card moves to `Plan` only when that decomposition exists. Taking a card straight to tests is
+  the mistake this rule exists to prevent.
+- The exceptions are narrow and named, and the pull request says which one it used: a merge-conflict
+  resolution, a one-line typo in a document the card itself names, and a defect whose fix is already
+  fully specified by a frozen test. Everything else starts with the decomposition.
+
+## The pipeline
+
+One card moves through the roles in a fixed order, in the vocabulary this repository already uses:
+the **architect** decomposes, the **specifier** freezes stubs and tests, the **executor**
+implements, the **reviewer** reviews each subtask diff, the **reviewer_final** reviews the whole
+feature branch before a human merges it.
+
+1. The orchestrator takes the card the owner names and hands it to the architect.
+2. The architect splits the card into separate subtasks and, for each one, states **what** is
+   written — the methods, the logic, the functions — and **where** it lives.
+3. From the architect's analysis the specifier implements the stubs and the tests that cover the
+   behaviour — one function per pass — and the tests are property-based (`hypothesis`).
+4. After the specifier's `expect-fail` gate is green and before the executor starts, a
+   `test_review` step checks each frozen function's tests against the plan's logic description
+   and acceptance pairs, in a single non-agentic call by a model of a vendor different from the
+   specifier's and the executor's. The executor starts only on a `pass` verdict; a `fail` returns
+   the findings to the specifier, and a finding that the plan itself is inconsistent goes to the
+   architect.
+5. The executor takes those tests, the description of the logic and the stubs, and implements them —
+   also one function per run.
+6. The reviewer reviews the change of each function separately and says what to fix.
+7. The executor then closes the gaps in the logic's coverage: it freezes the implemented function
+   against changes, writes the test for the uncovered behaviour, runs the tests, and if a test
+   exposes a defect it fixes the function — the defect is fixed in the branch that is open, not
+   written down for later (`## Tech debt`).
+8. The reviewer reads everything that is finished and criticises it in full: tests that test
+   nothing, logic that breaks on non-standard parameters — and says what to fix.
+9. Every function and every slice of business logic lands as its own `task/<feat>/<subtask>` branch
+   merged into the card's feature branch `feat/<slug>`. **The pipeline merges it**: once the branch's
+   own gates are green and its per-function review has no open blocking finding, the merge happens on
+   its own — no human step, no waiting for the owner. After all of them are merged there is the final
+   review by a stronger model — the `reviewer_final` run.
+10. When the final review asks for changes, **the architect decides** whether the changes are made —
+    not the orchestrator. The executor writes the changes; the tests, when needed, are written by the
+    specifier.
+
+The invariants the procedure stands on:
+
+- The unit of work is one function or one slice of business logic: its own branch, its own review,
+  its own merge into the feature branch.
+- Placement is never invented downstream: the architect names it, the specifier and the executor
+  follow it.
+- The acceptance of a step is a command, and a step is finished when the command is green
+  (`## Gates`).
+- The tests are checked against the plan before the executor starts: no run is spent on a function
+  whose frozen tests the plan's description cannot satisfy, and a plan that fails its own
+  `test_review` goes back to the architect, not to the executor.
+- The decision to rework after the final review belongs to the architect, the writing to the
+  executor, the tests to the specifier — the orchestrator routes, it does not decide.
+- The reviewer reviews per function first and in full afterwards, and its second pass is where
+  vacuous tests and non-standard-parameter breakage are named explicitly (`## Review before merge`).
 
 ## Limits
 

@@ -13,9 +13,11 @@ from __future__ import annotations
 import os
 import re
 import sys
+from pathlib import Path
 
 ROLES = ("architect", "chief_architect", "specifier", "executor", "arbiter", "reviewer", "vision")
 UI_ROLES = ("designer",)  # required when the project declares `ui: true`
+BLACKLIST = Path(__file__).resolve().parents[2] / "config" / "models-blacklist.yaml"
 
 
 def _clean(raw: str) -> str:
@@ -48,6 +50,56 @@ def parse_flat(path: str) -> dict[str, dict[str, str]]:
     return out
 
 
+def read_blacklist(path: Path) -> list[dict[str, str]]:
+    """Reads the `models:` list of the blacklist file into one mapping per entry.
+
+    The file is a flat list of `- model:` blocks with an indented `reason:`; same minimal reader
+    philosophy as `parse_flat` — no PyYAML. Raises OSError when the file cannot be read.
+    """
+    entries: list[dict[str, str]] = []
+    current: dict[str, str] | None = None
+    with open(path, encoding="utf-8") as handle:
+        for raw in handle:
+            line = raw.strip()
+            if not line or line.startswith("#") or line == "models:":
+                continue
+            if line.startswith("- "):
+                current = {}
+                entries.append(current)
+                line = line[2:].strip()
+            if current is None:
+                continue
+            key, separator, value = line.partition(":")
+            if separator:
+                current[key.strip()] = _clean(value.strip())
+    return entries
+
+
+def blacklist_problems(models: dict[str, str], entries: list[dict[str, str]]) -> list[tuple[str, str, str]]:
+    """One `(role, model, reason)` tuple per configured model an entry forbids, in role-name order.
+
+    An entry matches by exact name or, when it ends with `*`, by prefix; both case-insensitively
+    over the whole name. The reason is the matching entry's own, even when blank. An empty model is
+    the unset failure of the caller, not a hit.
+    """
+    problems: list[tuple[str, str, str]] = []
+    for role in sorted(models):
+        model = models.get(role) or ""
+        if not model:
+            continue
+        for entry in entries:
+            pattern = (entry.get("model") or "").strip()
+            if not pattern:
+                continue
+            prefix = pattern[:-1]
+            matched = (
+                model.lower().startswith(prefix.lower()) if pattern.endswith("*") else model.lower() == pattern.lower()
+            )
+            if matched:
+                problems.append((role, model, entry.get("reason", "")))
+    return problems
+
+
 def main() -> int:
     if len(sys.argv) < 2:
         print(__doc__)
@@ -66,6 +118,19 @@ def main() -> int:
     if missing:
         print(f"ERROR: {slug}: не заданы модели ролей: {', '.join(missing)}", file=sys.stderr)
         print(f"       заполните ~/.config/cascade/projects/{slug}.yaml → models:", file=sys.stderr)
+        return 1
+
+    try:
+        entries = read_blacklist(BLACKLIST)
+    except OSError:
+        print(f"WARN: {slug}: список запрещённых моделей недоступен: {BLACKLIST}", file=sys.stderr)
+        entries = []
+    forbidden = blacklist_problems(models, entries)
+    if forbidden:
+        print(f"ERROR: {slug}: роли сконфигурированы моделями из запрещённого списка ({BLACKLIST}):", file=sys.stderr)
+        for role, model, reason in forbidden:
+            suffix = f" — {reason}" if reason else ""
+            print(f"       {role}={model}{suffix}", file=sys.stderr)
         return 1
 
     key_ref = cfg.get("_", {}).get("key_ref") or "LITELLM_KEY"

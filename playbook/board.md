@@ -12,7 +12,7 @@ cosmetic problem; it is the wrong status shown to the person paying for the work
   merged → `Done`, closed unmerged → `Plan`, and an unblocked `Backlog` card fills a free `Plan`
   slot, highest priority first — with `max_plan: null` in `tools/board/policy.json` that means every unblocked card, not a capped queue.
 - A container card (a roadmap stage, a design brief) carries the `epic` label and is never moved by
-  the sync — without the label a stage card would flood `Plan` as "unblocked"; `board_seed.py`
+  the sync — without the label a stage card would flood `Plan` as "unblocked"; `rig.board_seed`
   labels the stage cards it creates.
 - A pull request names its card at the start of the title: `[#174] chore: …`. The `PR title names a
   card` job rejects a title without the `[#<card>]` prefix. Since GitHub appends `(#8)`, a bare
@@ -33,11 +33,12 @@ cosmetic problem; it is the wrong status shown to the person paying for the work
   it into that column, and moving it out silently clears `done` — the board says `Done: 0` while
   finished cards sit in `Tests`. Fix once per view:
   `POST /projects/P/views/V {"done_bucket_id": <Done>, "default_bucket_id": <Backlog>}`;
-  `board.py create_project` now sets both.
+  project creation through the board library (`~/soft/vikunja/board.py`, called by
+  `rig.board_seed`) sets both.
 - **The view endpoint returns at most 50 tasks per column per page**; `?page=2` continues the same
   column. One response cannot prove a card is missing, and a naive reader declares live cards
   "orphans".
-- A card in no bucket is invisible on the board entirely. `board.py create` moves it itself; cards
-  created around the adapter do not. `--orphans --to Backlog` puts them back.
-- Renaming a column breaks `board.py` (it resolves buckets by title) and any saved filter; rename the
-  card, not the column.
+- A card in no bucket is invisible on the board entirely. Cards created around the adapter land
+  there; `cd bin && python3 -m rig.board_archive --project <slug> --orphans --to Backlog` puts them back.
+- Renaming a column breaks the board tools (they resolve buckets by title) and any saved filter;
+  rename the card, not the column.

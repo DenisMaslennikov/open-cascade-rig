@@ -45,6 +45,7 @@ from .rig_conf import gateway
 CONFIG = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "cascade"
 STATE = Path(os.environ.get("XDG_STATE_HOME", Path.home() / ".local" / "state")) / "cascade"
 BIN = Path(__file__).resolve().parent
+PKG_ROOT = BIN.parent
 
 SKIP_DIRS = {
     ".git",
@@ -451,9 +452,10 @@ def validate_plan(plan: dict, repo: Path) -> tuple[bool, list[str]]:
     tmp.parent.mkdir(parents=True, exist_ok=True)
     tmp.write_text(json.dumps(plan, indent=1), encoding="utf-8")
     proc = subprocess.run(
-        [sys.executable, str(BIN / "validate_plan.py"), str(tmp), "--repo", str(repo)],
+        [sys.executable, "-m", "rig.validate_plan", str(tmp), "--repo", str(repo)],
         capture_output=True,
         text=True,
+        cwd=PKG_ROOT,
     )
     notes = [ln for ln in (proc.stderr or "").splitlines() if ln.startswith("note:")]
     errors = [ln for ln in (proc.stderr or "").splitlines() if ln.strip() and not ln.startswith("note:")]
@@ -469,7 +471,8 @@ def record_usage(slug: str, model: str, usage: dict, task_id: str) -> None:
     cached = int((usage.get("prompt_tokens_details") or {}).get("cached_tokens") or 0)
     cmd = [
         sys.executable,
-        str(BIN / "usage.py"),
+        "-m",
+        "rig.usage",
         "record",
         "-p",
         slug,
@@ -490,7 +493,7 @@ def record_usage(slug: str, model: str, usage: dict, task_id: str) -> None:
     ]
     if cached:
         cmd += ["--cache-read", str(cached)]
-    subprocess.run(cmd, capture_output=True, text=True)
+    subprocess.run(cmd, capture_output=True, text=True, cwd=PKG_ROOT)
 
 
 # ---------------------------------------------------------------- main

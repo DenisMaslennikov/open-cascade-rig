@@ -36,6 +36,7 @@ from .plan_task import CONFIG, STATE, load_keys, parse_simple_yaml, token_limit
 from .rig_conf import app_root, gateway
 
 BIN = Path(__file__).resolve().parent
+PKG_ROOT = BIN.parent
 
 OH_VENV = Path.home() / "soft" / "openhands" / ".venv"
 BIN_PY = OH_VENV / "bin" / "python"
@@ -94,14 +95,14 @@ def git(worktree: Path, *args: str) -> subprocess.CompletedProcess:
 
 
 def gate(command: str, **kwargs) -> dict:
-    args = [sys.executable, str(BIN / "gate.py"), command]
+    args = [sys.executable, "-m", "rig.gate", command]
     for key, value in kwargs.items():
         if value is None:
             continue
         args.append(f"--{key.replace('_', '-')}")
         if value is not True:
             args.append(str(value))
-    proc = subprocess.run(args, capture_output=True, text=True)
+    proc = subprocess.run(args, capture_output=True, text=True, cwd=PKG_ROOT)
     try:
         return json.loads(proc.stdout or "{}")
     except json.JSONDecodeError:
@@ -157,7 +158,8 @@ def metrics_of(conversation) -> dict:
 def record_usage(slug: str, feature: str, task_id: str, model: str, usage: dict) -> None:
     cmd = [
         sys.executable,
-        str(BIN / "usage.py"),
+        "-m",
+        "rig.usage",
         "record",
         "-p",
         slug,
@@ -178,7 +180,7 @@ def record_usage(slug: str, feature: str, task_id: str, model: str, usage: dict)
     ]
     if usage.get("cache_read_tokens"):
         cmd += ["--cache-read", str(usage["cache_read_tokens"])]
-    subprocess.run(cmd, capture_output=True, text=True)
+    subprocess.run(cmd, capture_output=True, text=True, cwd=PKG_ROOT)
 
 
 def run_agent(
