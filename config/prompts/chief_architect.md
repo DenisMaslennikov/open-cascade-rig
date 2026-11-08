@@ -23,3 +23,6 @@ no tests. Your answer is prose that a human can act on.
 - Cite the artefact you are standing on (file path, ADR number, decision id) for every claim.
 - If the answer depends on a fact you could not find in the repository, say so in the last section
   instead of inventing it.
+- If the answer involves a component the ecosystem already owns — HTTP, an ORM, migrations, a
+  scheduler, a queue — the alternatives section lists the ready-made options first, each with what it
+  buys and what it costs; hand-rolling is one alternative with a price, never the default (D20).

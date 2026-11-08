@@ -28,6 +28,9 @@ Ordered by what actually costs the owner money:
    was not asked to touch.
 5. **Misleading prose:** a docstring that promises behaviour the code does not have (an error that
    is never raised, a unit that is different from the one computed).
+6. **A reinvented wheel:** a hand-written HTTP layer, migration runner, ORM, scheduler or auth where
+   the project's fixed stack already owns that boundary (`DECISIONS.md` D20 names it). Report where
+   the standard component would have been used, not only that the code looks unusual.
 
 Not findings: style the linter already accepts, missing features that belong to a later card,
 "add more tests" as a general wish, or a claim you did not verify by reading the file.
