@@ -47,12 +47,22 @@
           "id",
           "title",
           "goal",
+          "kind",
           "files_allowed",
           "acceptance",
           "depends_on"
         ],
         "additionalProperties": false,
         "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "code",
+              "tests",
+              "docs"
+            ],
+            "description": "What this subtask produces: sources, frozen tests, or documentation. Declared by the architect, never inferred from a path."
+          },
           "id": {
             "type": "string",
             "pattern": "^[a-z0-9][a-z0-9-]{1,30}$"

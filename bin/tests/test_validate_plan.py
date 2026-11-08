@@ -1,10 +1,12 @@
-"""The plan validator's own contract: where the schema lives and which paths a plan may name.
+"""The plan validator's own contract: where the schema lives, and what a plan may name.
 
-Card #191 moved the modules from `bin/` to `bin/rig/`, and the schema path built as
-`<here>/../schema` started pointing at a directory that does not exist — the validator crashed on every
-plan, which the suite never noticed because nothing drove it. These tests pin both the resolution and
-the alphabet: a repository whose sources are `bin/rig/`, `tools/` and a root Alembic tree must be
-plannable, and a test subtask under `bin/tests/` must not be read as a source subtask.
+Card #191 moved the modules from `bin/` to `bin/rig/`, and the schema path built as `<here>/../schema`
+started pointing at a directory that does not exist — the validator crashed on every plan, which the
+suite never noticed because nothing drove it. These tests pin the resolution and the alphabet.
+
+The validator no longer guesses what a path is: a subtask declares `kind` (`code`, `tests`, `docs`) and
+the plan is read as written. A path prefix tells the validator nothing about the file's role, so it is
+not asked.
 """
 
 from __future__ import annotations
@@ -20,8 +22,8 @@ from rig.validate_plan import check_plan, main, schema_path
 SRC_PREFIXES = ["src", "app", "lib", "pkg", "bin", "tools", "alembic"]
 
 
-def plan(*subtasks: tuple[str, list[str]]) -> dict:
-    """A minimal plan: (id, files_allowed) pairs, no dependencies, one acceptance pair each."""
+def plan(*subtasks: tuple[str, list[str]] | tuple[str, list[str], str]) -> dict:
+    """A minimal plan: (id, files_allowed) or (id, files_allowed, kind) triples, no dependencies."""
     return {
         "task": {
             "id": "probe-task",
@@ -31,14 +33,15 @@ def plan(*subtasks: tuple[str, list[str]]) -> dict:
         },
         "subtasks": [
             {
-                "id": sid,
-                "title": f"Subtask {sid}",
+                "id": entry[0],
+                "title": f"Subtask {entry[0]}",
                 "goal": "A subtask with the files this test names.",
-                "files_allowed": files,
+                "kind": entry[2] if len(entry) == 3 else "code",
+                "files_allowed": entry[1],
                 "acceptance": [{"in": "input", "out": "output"}],
                 "depends_on": [],
             }
-            for sid, files in subtasks
+            for entry in subtasks
         ],
     }
 
@@ -70,23 +73,39 @@ def test_a_root_alembic_tree_and_dependency_pins_are_plannable():
     assert errors == []
 
 
-def test_a_test_subtask_under_bin_is_not_read_as_a_source_subtask():
-    """`bin/tests/` is tests; `bin/rig/` is sources. The prefix `bin/` must not blur the two."""
+def test_a_tests_subtask_declares_itself_instead_of_being_detected_by_its_path():
+    """The plan says `kind: tests`; the validator does not read directories to find out."""
     errors = check_plan(
         plan(
-            ("rail-tests", ["bin/tests/test_wrapper_rail_state.py"]),
-            ("rail-code", ["tools/wrapper/rail_state.py"]),
+            ("rail-tests", ["bin/tests/test_wrapper_rail_state.py"], "tests"),
+            ("rail-code", ["tools/wrapper/rail_state.py"], "code"),
         )
     )
 
     assert errors == []
 
 
-def test_one_subtask_may_not_hold_tests_and_sources_together():
-    """The separation survives the new prefixes: this is the rule, not a naming preference."""
-    errors = check_plan(plan(("mixed", ["bin/tests/test_wrapper_rail_state.py", "tools/wrapper/rail_state.py"])))
+def test_a_subtask_without_a_kind_is_rejected():
+    """`kind` is required: an unlabelled subtask is a plan the executor cannot be gated against."""
+    broken = plan(("one", ["tools/wrapper/rail_db.py"]))
+    del broken["subtasks"][0]["kind"]
 
-    assert any("тестов и исходников" in error for error in errors)
+    errors = check_plan(broken)
+
+    assert any("kind" in error for error in errors)
+
+
+def test_an_unknown_kind_is_rejected():
+    errors = check_plan(plan(("one", ["tools/wrapper/rail_db.py"], "sources")))
+
+    assert any("kind" in error for error in errors)
+
+
+def test_a_plan_without_a_code_subtask_is_rejected():
+    """Documentation and tests alone are not a covered task."""
+    errors = check_plan(plan(("docs", ["docs/hermes-session-store.md"], "docs")))
+
+    assert any("kind: code" in error for error in errors)
 
 
 @given(prefix=st.sampled_from(SRC_PREFIXES), name=st.from_regex(r"[a-z][a-z0-9_]{2,20}\.py", fullmatch=True))
@@ -125,7 +144,7 @@ def test_main_parses_the_plan_and_the_repo_with_argparse(tmp_path: Path):
 
 
 def test_main_reports_an_invalid_plan_with_exit_code_one(tmp_path: Path):
-    broken = dict(plan(("one", ["tools/wrapper/rail_db.py"])))
+    broken = plan(("one", ["tools/wrapper/rail_db.py"]))
     broken["subtasks"][0]["files_allowed"] = ["config/schema/plan.schema.json"]
     probe = tmp_path / "plan.json"
     probe.write_text(json.dumps(broken), encoding="utf-8")

@@ -44,15 +44,8 @@ from .plan_task import (
     token_limit,
 )
 from .rig_conf import app_root, gateway
-from .validate_plan import SRC_PREFIXES, TESTS_PREFIXES, classify
 
 BIN = Path(__file__).resolve().parent
-
-# Read from the plan alphabet rather than restated here: #191 moved the rig's own sources from `bin/`
-# to `bin/rig/` and the specifier kept rejecting every stub outside `src/`, which is why card #203's
-# first stub pass died on `a stub must live under src/`.
-SOURCE_DIRS = ", ".join(SRC_PREFIXES)
-TEST_DIRS = ", ".join(TESTS_PREFIXES)
 
 HOUSE_RULES = """
 HOUSE RULES (from the project owner, binding for every role):
@@ -76,11 +69,8 @@ Answer with exactly one JSON object and nothing else:
 Hard rules:
 - A `kind: "stub"` path comes from the subtask's `files_allowed` list. No other source file may be
   produced.
-- A `kind: "test"` path is a unit test in the feature's own folder: `<feature>/tests/test_<thing>.py`
-  (`tools/wrapper/rail_db.py` -> `tools/wrapper/tests/test_rail_db.py`, `bin/rig/gate.py` ->
-  `bin/tests/test_gate.py`). When the plan already names the test files, use exactly those paths.
-  Never mirror a source path into a `tests/unit/...` copy and never pair a test with a file by name:
-  which lines are covered is `coverage`'s answer, not the file system's.
+- A `kind: "test"` path must be one of the test files the plan names for this subtask — exactly those
+  paths, nothing derived from a source file's name. If the plan names none, produce no test file.
 - Unit tests only for now: a test that needs the network, a database file or a running server is not
   part of this subtask.
 - When a stub file already exists, keep its existing code verbatim (imports may be extended,
@@ -171,17 +161,6 @@ def build_user_message(subtask: dict, repo_doc: str, test_rules: str, plan_tests
     )
 
 
-def is_unit_test_path(path: str) -> bool:
-    """`<feature>/tests[/…]/test_*.py` — a unit test under a `tests` directory, nothing else.
-
-    The path itself is not compared with any source path: when the plan froze the test files, those
-    paths are the rule; this check only keeps a non-test path (a module beside its own tests, a doc)
-    out of the `test` kind.
-    """
-    parts = Path(path).parts
-    return "tests" in parts[:-1] and parts[-1].startswith("test_") and parts[-1].endswith(".py")
-
-
 def write_files(
     worktree: Path, files: list[dict], allowed: list[str], force: bool, plan_tests: set[str] | None = None
 ) -> tuple[bool, list[str]]:
@@ -202,20 +181,14 @@ def write_files(
             path == a or path.startswith(a.rstrip("/") + "/") or (a.endswith(".py") and path == a) for a in normalized
         )
         if kind == "test":
-            if not is_unit_test_path(path):
-                errors.append(f"{path}: a unit test lives at <feature>/tests/test_*.py")
-                continue
-            if frozen and path not in frozen:
-                errors.append(f"{path}: the plan froze no such test file; expected one of {sorted(frozen)}")
+            # The architect named the test files; the specifier may not add a path of its own, and the
+            # gate does not guess which paths are tests — the plan says so.
+            if path not in frozen:
+                errors.append(f"{path}: the plan names no such test file; expected one of {sorted(frozen)}")
                 continue
             inside = True
         if not inside:
             errors.append(f"{path}: outside files_allowed {allowed}")
-            continue
-        if kind == "stub" and not (
-            classify(path).startswith(SRC_PREFIXES) and not classify(path).startswith(TESTS_PREFIXES)
-        ):
-            errors.append(f"{path}: a stub must live under {SOURCE_DIRS}")
             continue
         extending = (worktree / path).exists()  # an extension keeps real code, it is not a stub
         is_error_module = "Error(" in content and "NotImplementedError" not in content

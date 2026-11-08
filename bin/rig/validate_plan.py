@@ -25,20 +25,7 @@ import os
 import sys
 from pathlib import Path
 
-TESTS_PREFIXES = ("tests/", "test/", "bin/tests/")
-# The repository's sources are not always under src/: the rig's own package is `bin/rig`, the
-# wrapper's tools are `tools/`, and a migration tree is `alembic/`. `bin/tests/` is matched by
-# TESTS_PREFIXES first, so a `bin/` entry does not turn a test subtask into a source one.
-SRC_PREFIXES = ("src/", "app/", "lib/", "pkg/", "bin/", "tools/", "alembic/")
-CONTOUR_PREFIXES = ("backend/", "frontend/")  # монорепо: контур перед src/tests
-
-
-def classify(path: str) -> str:
-    """Отбрасывает префикс контура, чтобы src/ и tests/ распознавались в монорепо."""
-    for prefix in CONTOUR_PREFIXES:
-        if path.startswith(prefix):
-            return path[len(prefix) :]
-    return path
+PLAN_KINDS = ("code", "tests", "docs")
 
 
 def schema_path() -> Path:
@@ -162,16 +149,14 @@ def check_plan(plan: dict, repo: Path | None = None) -> list[str]:
 
     for s in subs:
         files = s["files_allowed"]
-        paths = [classify(f) for f in files]
-        has_tests = any(p.startswith(TESTS_PREFIXES) for p in paths)
-        has_src = any(p.startswith(SRC_PREFIXES) and not p.startswith(TESTS_PREFIXES) for p in paths)
-        if has_tests and has_src:
-            errors.append(
-                f"{s['id']}: файлы тестов и исходников в одной подзадаче — "
-                f"нарушает разделение «тесты пишет не тот, кто код»"
-            )
-        if not has_tests and not has_src and not files:
+        if s.get("kind") not in PLAN_KINDS:
+            errors.append(f"{s['id']}: kind должна быть одна из {PLAN_KINDS}, получено {s.get('kind')!r}")
+        if not files:
             errors.append(f"{s['id']}: files_allowed пуст")
+        for entry in files:
+            # A path outside the worktree is not a path the executor may touch, whatever it starts with.
+            if entry.startswith("/") or ".." in entry.split("/"):
+                errors.append(f"{s['id']}: путь должен быть относительным и без '..': {entry}")
         if repo:
             for f in files:
                 if not os.path.exists(os.path.join(repo, f)):
@@ -187,8 +172,10 @@ def check_plan(plan: dict, repo: Path | None = None) -> list[str]:
             if inter:
                 errors.append(f"{a['id']} и {b['id']} независимы, но делят файлы: {sorted(inter)}")
 
-    if not any(any(classify(f).startswith(SRC_PREFIXES) for f in s["files_allowed"]) for s in subs):
-        errors.append("в плане нет ни одной подзадачи с исходниками — задачи без кода не считаются покрытыми")
+    if not any(s.get("kind") == "code" for s in subs):
+        errors.append(
+            "в плане нет ни одной подзадачи с исходниками (kind: code) — задачи без кода не считаются покрытыми"
+        )
 
     return errors
 

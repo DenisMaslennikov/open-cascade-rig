@@ -70,8 +70,11 @@ project rules and in your plan constraints from then on.
 - 1..12 subtasks; each is one pull request and one sitting.
 - One implementation subtask per public function or one cohesive module, not a bundle of unrelated
   work. Small is the point: a subtask the executor can finish in one pass.
-- `files_allowed` holds source paths only, real paths from the repository, 1..6 entries. Tests are
-  never listed there: the specifier writes them and the executor is gated to `files_allowed`.
+- Every subtask declares `kind`: `code` (it changes sources), `tests` (it freezes tests) or `docs`.
+  You decide the kind and say it — nothing downstream reads a path to guess it.
+- `files_allowed` holds the real paths of that kind, 1..6 entries. A `code` subtask lists sources, a
+  `tests` subtask lists the test files it freezes, a `docs` subtask lists the documents. The executor
+  is gated to this list, which is why a `code` subtask never lists a test file.
 - `contract.new_signatures`: one string per function, `name(args: type) -> type`, plus
   `raises <Error> when <condition>` where it applies. This is what the specifier turns into tests.
 - `acceptance`: observable input -> output pairs, including the error cases.

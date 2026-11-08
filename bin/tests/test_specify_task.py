@@ -1,9 +1,8 @@
-"""The specifier's file gate: a stub where the plan says, a unit test in the feature's own folder.
+"""The specifier's file gate: the plan decides what a file is.
 
-Two rules meet here. A stub must land in a source root the plan alphabet admits (`tools/`, `bin/rig/`,
-`alembic/` — card #205); a unit test must land in the feature's own `tests/` directory and must be one
-of the files the plan froze. Nothing pairs a test with a source file by name: coverage answers what is
-covered, the file system is not asked.
+The architect names the files of a subtask; the specifier writes stubs into those source files and tests
+into the test files the plan froze. Nothing here reads a path to guess whether it is a test: a path is a
+test only because the plan named it as one.
 """
 
 from __future__ import annotations
@@ -20,8 +19,7 @@ def write(worktree: Path, files: list[dict], allowed: list[str], plan_tests: set
     return write_files(worktree, files, allowed, force=False, plan_tests=plan_tests)
 
 
-def test_a_stub_under_tools_is_accepted(tmp_path: Path):
-    """`tools/` is a source root of this repository; the gate asks the alphabet, not `src/`."""
+def test_a_stub_in_the_planned_file_is_accepted(tmp_path: Path):
     ok, errors = write(
         tmp_path,
         [{"path": "tools/wrapper/rail_db.py", "kind": "stub", "content": STUB}],
@@ -41,30 +39,19 @@ def test_a_stub_in_the_rigs_own_package_is_accepted(tmp_path: Path):
     assert ok, errors
 
 
-def test_a_stub_outside_every_source_root_is_rejected(tmp_path: Path):
+def test_a_file_outside_files_allowed_is_rejected(tmp_path: Path):
+    """The scope lock is `files_allowed`, not a directory convention."""
     ok, errors = write(
         tmp_path,
         [{"path": "config/schema/rail_db.py", "kind": "stub", "content": STUB}],
-        ["config/schema/rail_db.py"],
-    )
-
-    assert not ok
-    assert any("stub must live under" in error for error in errors)
-
-
-def test_a_unit_test_in_the_feature_folder_is_accepted(tmp_path: Path):
-    """`tools/wrapper/rail_db.py` -> `tools/wrapper/tests/test_rail_db.py`: the suite travels with it."""
-    ok, errors = write(
-        tmp_path,
-        [{"path": "tools/wrapper/tests/test_rail_db.py", "kind": "test", "content": TEST}],
         ["tools/wrapper/rail_db.py"],
     )
 
-    assert ok, errors
+    assert not ok
+    assert any("outside files_allowed" in error for error in errors)
 
 
-def test_a_frozen_test_named_by_the_plan_is_accepted(tmp_path: Path):
-    """The plan names the file, the gate accepts it — the plan is the decision, not a naming rule."""
+def test_a_test_file_the_plan_froze_is_accepted(tmp_path: Path):
     ok, errors = write(
         tmp_path,
         [{"path": "bin/tests/test_wrapper_rail_db.py", "kind": "test", "content": TEST}],
@@ -75,18 +62,8 @@ def test_a_frozen_test_named_by_the_plan_is_accepted(tmp_path: Path):
     assert ok, errors
 
 
-def test_without_a_frozen_list_any_tests_path_is_the_plans_choice(tmp_path: Path):
-    """The plan owns the test paths; the gate does not compare them with source paths."""
-    ok, errors = write(
-        tmp_path,
-        [{"path": "tools/wrapper/tests/test_rail_db.py", "kind": "test", "content": TEST}],
-        ["tools/wrapper/rail_db.py"],
-    )
-
-    assert ok, errors
-
-
-def test_a_test_file_the_plan_did_not_freeze_is_rejected(tmp_path: Path):
+def test_a_test_file_the_plan_did_not_name_is_rejected(tmp_path: Path):
+    """The specifier may not invent a test path, whatever directory it points at."""
     ok, errors = write(
         tmp_path,
         [{"path": "tools/wrapper/tests/test_other.py", "kind": "test", "content": TEST}],
@@ -95,16 +72,28 @@ def test_a_test_file_the_plan_did_not_freeze_is_rejected(tmp_path: Path):
     )
 
     assert not ok
-    assert any("the plan froze no such test file" in error for error in errors)
+    assert any("the plan names no such test file" in error for error in errors)
 
 
-def test_a_test_beside_its_module_is_rejected(tmp_path: Path):
-    """A test next to the code it tests is not a `tests/` directory."""
+def test_a_test_without_a_planned_path_is_rejected(tmp_path: Path):
+    """No plan-named test file means no test file: the specifier does not choose its own home."""
     ok, errors = write(
         tmp_path,
-        [{"path": "tools/wrapper/test_rail_db.py", "kind": "test", "content": TEST}],
+        [{"path": "tools/wrapper/tests/test_rail_db.py", "kind": "test", "content": TEST}],
         ["tools/wrapper/rail_db.py"],
     )
 
     assert not ok
-    assert any("unit test lives at" in error for error in errors)
+    assert any("the plan names no such test file" in error for error in errors)
+
+
+def test_a_stub_that_does_not_raise_is_rejected(tmp_path: Path):
+    """A stub must be red for the right reason: `NotImplementedError`, not a working body."""
+    ok, errors = write(
+        tmp_path,
+        [{"path": "tools/wrapper/rail_db.py", "kind": "stub", "content": "VALUE = 1\n"}],
+        ["tools/wrapper/rail_db.py"],
+    )
+
+    assert not ok
+    assert any("NotImplementedError" in error for error in errors)
