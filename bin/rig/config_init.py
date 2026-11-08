@@ -53,6 +53,28 @@ def same(a: Path, b: Path) -> bool:
     return filecmp.cmp(a, b, shallow=False)
 
 
+def entry_report(bin_dir: Path) -> dict[str, list[str]]:
+    """List the tools `python3 -m rig <tool>` can reach from a package directory, and the gaps.
+
+    Only the modules of `<bin_dir>/rig` whose name does not start with an underscore are considered.
+    A module is a tool when it defines a module-level `main`; a module without one, or one that does
+    not compile, is unreachable — the point of the check is to name it instead of letting the
+    dispatcher raise a traceback on the machine that needed the tool.
+
+    Arguments:
+        bin_dir: the directory that holds the `rig` package, i.e. the repository's `bin`.
+
+    Returns:
+        A mapping with `"tools"` — the sorted names the dispatcher can run — and `"unreachable"` —
+        the sorted module names it cannot reach. `--check` prints this mapping under the `entry` key
+        of its JSON report.
+
+    Raises:
+        NotImplementedError: until the entry check is implemented.
+    """
+    raise NotImplementedError
+
+
 def check(repo: Path) -> int:
     rows = []
     drift = 0
