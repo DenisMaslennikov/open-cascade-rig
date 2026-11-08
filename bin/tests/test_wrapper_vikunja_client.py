@@ -15,12 +15,9 @@ import sys
 from pathlib import Path
 
 import pytest
+import vikunja_client as vk
 from hypothesis import given
 from hypothesis import strategies as st
-
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools" / "wrapper"))
-
-import vikunja_client as vk
 
 BASE = "http://board.test/api/v1"
 PROJECT_TITLE = "cascade-rig — отладка мультиагентного конвейера"
@@ -97,10 +94,10 @@ def client(routes_: dict, **kwargs) -> vk.VikunjaClient:
     return vk.VikunjaClient(BASE, token="test-token", transport=FakeTransport(routes_), **kwargs)
 
 
-def test_the_module_is_importable_through_the_package_path_the_rail_task_uses():
+def test_the_module_is_importable_through_the_package_path_the_rail_task_uses(repo_root):
     """Subtask 184.2 imports `tools.wrapper.vikunja_client` from the repository root; a rename or a
     wrapper `__init__.py` that changes the path would break it without any test noticing."""
-    root = str(Path(__file__).resolve().parents[1])
+    root = str(repo_root)
     sys.path.insert(0, root)
     try:
         module = importlib.import_module("tools.wrapper.vikunja_client")

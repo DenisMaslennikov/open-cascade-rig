@@ -40,7 +40,7 @@ import urllib.request
 from datetime import UTC, datetime
 from pathlib import Path
 
-from rig_conf import gateway
+from .rig_conf import gateway
 
 CONFIG = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "cascade"
 STATE = Path(os.environ.get("XDG_STATE_HOME", Path.home() / ".local" / "state")) / "cascade"

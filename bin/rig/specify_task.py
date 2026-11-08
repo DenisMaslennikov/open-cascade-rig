@@ -32,12 +32,7 @@ import sys
 from datetime import UTC, datetime
 from pathlib import Path
 
-from rig_conf import gateway
-
-BIN = Path(__file__).resolve().parent
-sys.path.insert(0, str(BIN))
-
-from plan_task import (  # noqa: E402
+from .plan_task import (
     CONFIG,
     STATE,
     extract_json,
@@ -46,6 +41,9 @@ from plan_task import (  # noqa: E402
     repo_map,
     token_limit,
 )
+from .rig_conf import gateway
+
+BIN = Path(__file__).resolve().parent
 
 HOUSE_RULES = """
 HOUSE RULES (from the project owner, binding for every role):
