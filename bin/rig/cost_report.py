@@ -19,9 +19,14 @@ cost in gateway prices (USD) | cost in OpenRouter list prices (USD):
      a `starting`/`running` record whose pid is gone, plus the window's ledger spend that no run
      explains.
 
-A run in progress — a record in `starting`/`running` whose pid the OS still holds (`os.kill(pid, 0)`
-succeeding, the test `run_records_reconcile.py` uses) — is neither a success nor a failure: it lands
-in neither table and the tool says on stderr that it skipped it, naming the run directory and the pid.
+A run in progress — a record in `starting`/`running` whose pid the OS still holds — is neither a
+success nor a failure: it lands in neither table and the tool says on stderr that it skipped it,
+naming the run directory and the pid. A pid alone can lie, because the OS reuses them, so the pid
+counts as the run's own process only when it started at or after the record's `started` stamp (a
+couple of seconds of tolerance absorb the gap between spawning the process and writing the record):
+on Linux the process start is read from `/proc/<pid>/stat` (field 22, clock ticks since boot) and
+`/proc/uptime` gives the boot moment, so `now - (uptime - starttime/CLK_TCK)` is the start on the
+wall clock. Where `/proc` is unreadable the answer falls back to the pid check alone.
 
 Attribution: a run is counted from one source, so no spend is counted twice. A ledger event belongs to
 the run whose `role` and `model` match that record and whose `ts` falls inside
@@ -74,6 +79,9 @@ from .rig_conf import STATE
 LIVE_STATES = ("starting", "running")
 STAMP_FORMAT = "%Y%m%dT%H%M%SZ"
 FIELDS = ("input_tokens", "output_tokens", "cache_read_tokens", "gateway_usd", "openrouter_usd")
+# The gap between spawning the run's process and writing its record: a pid is the run's own process
+# when it started up to this much after the record's `started` stamp.
+START_TOLERANCE = timedelta(seconds=2)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -120,11 +128,42 @@ def _iso_moment(ts: str) -> datetime | None:
     return moment.replace(tzinfo=UTC) if moment.tzinfo is None else moment.astimezone(UTC)
 
 
-def _alive(pid: Any) -> bool:
-    """Whether a process with that pid exists and can be signalled.
+def _proc_start_moment(pid: int) -> datetime | None:
+    """The moment the process started, on the wall clock, or None when `/proc` does not tell.
 
-    The same test `run_records_reconcile.py` uses in the state directory: `os.kill(pid, 0)` succeeds
-    for a live process and fails with `OSError` for a gone one.
+    Linux only: field 22 of `/proc/<pid>/stat` (the first field after the parenthesised command, or
+    20 zero-based fields after the closing parenthesis) is the start in clock ticks since boot, and
+    `/proc/uptime` measures the same boot, so `now - (uptime - starttime / CLK_TCK)` is the start on
+    the wall clock. Reading `/proc` in pieces guards against a command name that embeds `)` or
+    spaces and against a stat line the kernel cut short.
+    """
+    try:
+        uptime = float(Path("/proc/uptime").read_text(encoding="ascii").split()[0])
+        stat = Path(f"/proc/{pid}/stat").read_text(encoding="ascii")
+    except (OSError, ValueError, IndexError):
+        return None
+    fields_after_command = stat[stat.rfind(")") + 1 :].split()
+    if len(fields_after_command) < 20:
+        return None
+    try:
+        starttime = int(fields_after_command[19])
+        clk_tck = os.sysconf("SC_CLK_TCK")
+    except (ValueError, OSError):
+        return None
+    if clk_tck <= 0:
+        return None
+    return datetime.now(UTC) - timedelta(seconds=uptime - starttime / clk_tck)
+
+
+def _alive_since(pid: Any, started: datetime | None) -> bool:
+    """Whether a process with that pid exists and is old enough to be the run's own.
+
+    The existence test is the same one `run_records_reconcile.py` uses in the state directory:
+    `os.kill(pid, 0)` succeeds for a live process and fails with `OSError` for a gone one. A live
+    pid is accepted only when the process started at or after `started` (within the tolerance of
+    `START_TOLERANCE`), because the OS reuses pids and a dead run's pid may name a younger process.
+    A process that started before the record's stamp cannot be the run either. When `started` is
+    unknown or `/proc` is unreadable, the pid check alone decides.
     """
     if not pid:
         return False
@@ -132,12 +171,18 @@ def _alive(pid: Any) -> bool:
         os.kill(int(pid), 0)
     except (OSError, ValueError):
         return False
-    return True
+    if started is None:
+        return True
+    start = _proc_start_moment(int(pid))
+    if start is None:
+        return True
+    return start <= started + START_TOLERANCE
 
 
 def _is_live_run(record: dict) -> bool:
-    """Whether the record's run is still going: a live state and a pid the OS still holds."""
-    return record.get("state") in LIVE_STATES and _alive(record.get("pid"))
+    """Whether the record's run is still going: a live state and a pid that is the run's own."""
+    started = _stamp_moment(record.get("started") or "")
+    return record.get("state") in LIVE_STATES and _alive_since(record.get("pid"), started)
 
 
 def _read_records(project: str, since: datetime) -> list[tuple[dict, Path]]:
