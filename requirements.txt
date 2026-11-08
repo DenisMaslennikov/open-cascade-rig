@@ -1,0 +1,7 @@
+# Runtime stack of the wrapper's backend (card #203): the owner's fixed choice of framework and data
+# layer. Floors, not exact pins, like the rest of this repository: CI installs requirements-dev.txt,
+# which includes this file.
+fastapi>=0.162
+uvicorn>=0.54
+sqlalchemy>=2.1
+alembic>=1.20
