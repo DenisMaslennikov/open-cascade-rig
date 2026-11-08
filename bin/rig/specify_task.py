@@ -202,9 +202,7 @@ def write_files(
     # The mirrored `tests/unit/...` path is a src-layout convention. Other layouts name their tests
     # explicitly in the plan (`plan_tests`), and for them the mirror would be a wrong path, not a hint.
     src_layout = ("src/", "app/", "lib/", "pkg/")
-    expected_tests = {
-        derived_test_path(a) for a in allowed if any(classify(a).startswith(p) for p in src_layout)
-    }
+    expected_tests = {derived_test_path(a) for a in allowed if any(classify(a).startswith(p) for p in src_layout)}
     expected_tests |= set(plan_tests or ())
     for item in files:
         path = (item.get("path") or "").strip()
@@ -226,9 +224,7 @@ def write_files(
                 # The plan froze these tests; inventing a second home for them is how a suite grows a
                 # copy that nobody runs (the `tests/unit` mirror of a `tools/` stub is exactly that).
                 if path not in expected_tests:
-                    errors.append(
-                        f"{path}: the plan froze no such test file; expected one of {sorted(expected_tests)}"
-                    )
+                    errors.append(f"{path}: the plan froze no such test file; expected one of {sorted(expected_tests)}")
                     continue
             elif path not in expected_tests and not (stem_ok and under_tests):
                 errors.append(f"{path}: a test must live at one of {sorted(expected_tests)}")

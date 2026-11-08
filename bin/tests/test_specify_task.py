@@ -12,7 +12,7 @@ from pathlib import Path
 
 from rig.specify_task import write_files
 
-STUB = 'def store_seen() -> None:\n    raise NotImplementedError\n'
+STUB = "def store_seen() -> None:\n    raise NotImplementedError\n"
 TEST = "def test_store_seen():\n    assert True\n"
 
 
