@@ -106,6 +106,42 @@ def _write_record(state_root: Path, record: dict) -> Path:
     return path
 
 
+def _failed(
+    role: str,
+    started: datetime,
+    prompt: int,
+    completion: int,
+    cache_read: int,
+    cost_usd: float,
+    seconds: int,
+) -> dict:
+    """A record of a run that ended unsuccessfully but still reports what the gateway billed."""
+    record = _done(role, started, prompt, completion, cache_read, cost_usd, seconds)
+    record["state"] = "failed"
+    record["result"]["ok"] = False
+    return record
+
+
+def _event(
+    ts: datetime,
+    role: str,
+    input_tokens: int,
+    output_tokens: int,
+    cache_read_tokens: int,
+    cost: float,
+) -> dict:
+    """One model call as `usage.jsonl` records it."""
+    return {
+        "ts": _iso(ts),
+        "role": role,
+        "model": MODEL,
+        "input_tokens": input_tokens,
+        "output_tokens": output_tokens,
+        "cache_read_tokens": cache_read_tokens,
+        "cost": cost,
+    }
+
+
 def _write_events(state_root: Path, events: list[dict]) -> None:
     path = state_root / "cascade" / SLUG / "usage.jsonl"
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -201,6 +237,44 @@ def scenario(state_root: Path, now: datetime) -> dict:
 
 
 @pytest.fixture
+def failed_run_with_its_event(state_root: Path, now: datetime) -> dict:
+    """A failed record and one ledger event of the same run, inside the run's own window.
+
+    The record claims 100/10 tokens at $3.50 and the event 7000/3000 at $0.25, so a row that adds
+    the two together (7100/3010, $3.75) is distinguishable from one that carries the event alone.
+    """
+    started = now - timedelta(hours=2)
+    record = _failed("reviewer", started, 100, 10, 20, 3.5, 600)
+    _write_record(state_root, record)
+    event = _event(started + timedelta(minutes=5), "reviewer", 7000, 3000, 500, 0.25)
+    _write_events(state_root, [event])
+    return {"record": record, "event": event}
+
+
+@pytest.fixture
+def failed_run_without_event(state_root: Path, now: datetime) -> dict:
+    """A failed record with usage and no ledger line at all, as a hand-killed run often leaves it."""
+    record = _failed("reviewer", now - timedelta(hours=2), 100, 10, 20, 3.5, 600)
+    _write_record(state_root, record)
+    _write_events(state_root, [])
+    return {"record": record}
+
+
+@pytest.fixture
+def failed_run_with_two_events(state_root: Path, now: datetime) -> dict:
+    """A failed record and two ledger events of the same run, both inside its window."""
+    started = now - timedelta(hours=2)
+    record = _failed("reviewer", started, 100, 10, 20, 3.5, 3600)
+    _write_record(state_root, record)
+    events = [
+        _event(started + timedelta(minutes=5), "reviewer", 7000, 3000, 500, 0.25),
+        _event(started + timedelta(minutes=20), "reviewer", 2000, 1000, 100, 0.10),
+    ]
+    _write_events(state_root, events)
+    return {"record": record, "events": events}
+
+
+@pytest.fixture
 def live_run(state_root: Path, now: datetime) -> dict:
     """A `starting` record whose pid is this test process, so the run is visibly still going."""
     record = _starting("specifier", now - timedelta(hours=2), os.getpid())
@@ -234,6 +308,46 @@ def test_ledger_spend_attributed_to_a_run_is_not_counted_a_second_time(state_roo
     # The attributed event (90k input, $3.25) is invisible; only the stray one is in the failed table.
     assert payload["totals"]["failed"]["gateway_usd"] == pytest.approx(1.25)
     assert payload["totals"]["failed"]["input_tokens"] == 4000
+
+
+def test_a_failed_run_with_its_ledger_event_reports_the_event_not_the_record(state_root, failed_run_with_its_event):
+    row = next(row for row in _report_json(state_root)["failed"] if row["role"] == "reviewer")
+
+    assert row["input_tokens"] == 7000
+    assert row["output_tokens"] == 3000
+    assert row["cache_read_tokens"] == 500
+    assert row["gateway_usd"] == pytest.approx(0.25)
+    assert row["openrouter_usd"] == pytest.approx(0.0052, abs=1e-4)
+
+
+def test_a_failed_run_without_a_ledger_event_reports_the_usage_of_its_record(state_root, failed_run_without_event):
+    row = next(row for row in _report_json(state_root)["failed"] if row["role"] == "reviewer")
+
+    assert row["input_tokens"] == 100
+    assert row["output_tokens"] == 10
+    assert row["cache_read_tokens"] == 20
+    assert row["gateway_usd"] == pytest.approx(3.5)
+
+
+def test_two_ledger_events_of_one_failed_run_are_summed_without_the_record(state_root, failed_run_with_two_events):
+    row = next(row for row in _report_json(state_root)["failed"] if row["role"] == "reviewer")
+
+    assert row["input_tokens"] == 9000
+    assert row["output_tokens"] == 4000
+    assert row["cache_read_tokens"] == 600
+    assert row["gateway_usd"] == pytest.approx(0.35)
+
+
+def test_the_failed_total_stays_the_sum_of_its_rows_when_a_run_has_its_own_event(state_root, failed_run_with_its_event):
+    payload = _report_json(state_root)
+
+    for table in ("ok", "failed"):
+        rows = payload[table]
+        totals = payload["totals"][table]
+        for field in ("input_tokens", "output_tokens", "cache_read_tokens"):
+            assert totals[field] == sum(row[field] for row in rows)
+        for field in ("gateway_usd", "openrouter_usd"):
+            assert totals[field] == pytest.approx(sum(row[field] for row in rows), abs=1e-6)
 
 
 def test_the_gateway_column_is_the_record_and_the_openrouter_column_is_recomputed(state_root, scenario):
