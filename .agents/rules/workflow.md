@@ -4,10 +4,14 @@ When to read: before starting any task, and before opening a pull request.
 
 ## Branches and merge
 
-- `main` — through pull requests only: squash, linear history. **A human merges; never an agent, a
-  bot or a scheduled job.** In a single-owner repository the author cannot approve their own pull
-  request, so an approval counter would only ever be bypassed by an administrator merge. The
-  human-only merge plus a visible reviewer report replace the counter.
+- `main` — through pull requests only: squash, linear history. **A human merges into `main`; never an
+  agent, a bot or a scheduled job.** The pull request a human merges is the final feature pull request,
+  `feat/<slug>` into `main`, which carries the whole card; this is the only merge that waits for him.
+  A `task/<feature>/<id>` merge into `feat/<slug>` is the pipeline's own business — agent review with
+  no open blocking finding plus green gates — and the owner is not asked for it. In a single-owner
+  repository the author cannot approve their own pull request, so an approval counter would only ever
+  be bypassed by an administrator merge. The human-only merge plus a visible reviewer report replace
+  the counter.
 - `feat/<slug>` — an integration branch for a larger change; lives at most a week.
 - `task/<feature>/<id>` — atomic subtasks; their pull request targets `feat/*`, never `main`.
 - Never rewrite published history. `pre-push` refuses it; the repository ruleset refuses it again.
@@ -118,8 +122,10 @@ feature branch before a human merges it.
 7. The reviewer reads everything that is finished and criticises it in full: tests that test
    nothing, logic that breaks on non-standard parameters — and says what to fix.
 8. Every function and every slice of business logic lands as its own `task/<feat>/<subtask>` branch
-   merged into the card's feature branch `feat/<slug>`; after all of them are merged there is the
-   final review by a stronger model — the `reviewer_final` run.
+   merged into the card's feature branch `feat/<slug>`. **The pipeline merges it**: once the branch's
+   own gates are green and its per-function review has no open blocking finding, the merge happens on
+   its own — no human step, no waiting for the owner. After all of them are merged there is the final
+   review by a stronger model — the `reviewer_final` run.
 9. When the final review asks for changes, **the architect decides** whether the changes are made —
    not the orchestrator. The executor writes the changes; the tests, when needed, are written by the
    specifier.
