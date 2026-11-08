@@ -3,6 +3,20 @@
 **When to read:** before running any intellectual role (architect, specifier, designer, reviewer,
 chief architect) or the executor on a small chore.
 
+## The one entry point
+
+Every tool of the rig is a module of the `rig` package (`bin/rig/`) and is run from `bin`:
+
+```
+cd bin && python3 -m rig <tool> [args…]        # or: python3 -m rig --list
+```
+
+A tool name is a module of the package that exposes a module-level `main()`. Since card #191 nothing
+else works: `~/.config/cascade/bin/<tool>.py` — the old per-script address — no longer resolves to a
+runnable script, and anything that still calls it starts a process that dies instantly on
+"No such file". A read like `bin/rig/usage.py` in a chapter names a *path*; the command is the
+`python3 -m rig <tool>` form.
+
 ## Why a role is an agent and not one chat call
 
 A role has to read the repository, write files, run its own check and correct itself. A single

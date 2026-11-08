@@ -8,7 +8,7 @@ Read this first, then only the files the task actually touches. Everything here 
 | Operating knowledge (how to run it) | `PLAYBOOK.md` → `playbook/*.md` | before running any phase, and before debugging one |
 | Evidence (what a run cost and taught) | `evidence/` | when a claim about cost or model behaviour needs backing |
 | Roadmap and open questions | `PLAN.md` | before picking the next task |
-| Scripts | `bin/` | the only way to run a phase; no manual steps |
+| Scripts | `bin/` → `bin/rig/` | the only way to run a phase; no manual steps. The entry point is `cd bin && python3 -m rig <tool>` — a tool name is a module of the `rig` package exposing `main()`; a per-script address like `bin/<tool>.py` died with card #191 |
 | Configuration | `config/` + `config/README.md` | canonical prompts, plan schema, `*.example.yaml`; the live settings are in `~/.config/cascade`, symlinked back to this directory |
 | Process rules | `.agents/rules/workflow.md` | before any task, and before opening a pull request |
 | Code style | `.agents/rules/code_style.md` | before editing `bin/`, `config/` or `tests/` |
@@ -49,8 +49,9 @@ Hooks are versioned: `git config core.hooksPath .githooks` once per clone (the p
 to commit a staged file that also has unstaged edits, because the formatter would take them).
 
 ```bash
-# Scripts are a package (`bin/rig`) and are run from `bin`: python3 -m rig.<tool>. The package is
-# called `rig`, not `src`, because mutmut 3.8 reserves the `src.` prefix for itself (stats.py asserts).
+# Scripts are a package (`bin/rig`) and are run from `bin`: python3 -m rig <tool>, or
+# python3 -m rig.<tool> for the same thing. The package is called `rig`, not `src`, because
+# mutmut 3.8 reserves the `src.` prefix for itself (stats.py asserts).
 python3 -m ruff check . && python3 -m ruff format --check .   # or: make lint / make fmt
 cd bin && python3 -m pytest                                  # or: make test
 cd bin && python3 -m pytest -m property                      # or: make property
