@@ -43,7 +43,7 @@ from .plan_task import (
     repo_map,
     token_limit,
 )
-from .rig_conf import gateway
+from .rig_conf import app_root, gateway
 from .validate_plan import SRC_PREFIXES, TESTS_PREFIXES, classify
 
 BIN = Path(__file__).resolve().parent
@@ -485,7 +485,7 @@ def main() -> int:
     sha = git(worktree, "rev-parse", "HEAD").stdout.strip()
     result["commit"] = sha
 
-    backend = worktree / "backend"
+    backend = app_root(worktree)
     rel_tests = [p.split("backend/", 1)[-1] if p.startswith("backend/") else p for p in test_paths]
     cmd = f"{args.python} -m pytest {' '.join(rel_tests)} -q"
     gate = subprocess.run(
