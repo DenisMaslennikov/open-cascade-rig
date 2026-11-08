@@ -23,7 +23,9 @@ Exit 0 — in sync (or the action succeeded), 1 — drift found / action failed.
 from __future__ import annotations
 
 import argparse
+import ast
 import filecmp
+import json
 import os
 import shutil
 import sys
@@ -53,6 +55,38 @@ def same(a: Path, b: Path) -> bool:
     return filecmp.cmp(a, b, shallow=False)
 
 
+def _has_main_block(tree: ast.Module) -> bool:
+    """Whether the module carries an `if __name__ == "__main__"` block."""
+    for node in tree.body:
+        if not isinstance(node, ast.If):
+            continue
+        test = node.test
+        return (
+            isinstance(test, ast.Compare)
+            and isinstance(test.left, ast.Name)
+            and test.left.id == "__name__"
+            and any(isinstance(comp, ast.Constant) and comp.value == "__main__" for comp in test.comparators)
+        )
+    return False
+
+
+def _classify(path: Path) -> str:
+    """`tool` — a module with a module-level `main`; `drift` — one that means to be but cannot be.
+
+    A module that does not parse, or that runs something as `__main__` without exposing the `main`
+    the dispatcher would call, is drift: it was written as an entry point and stays broken. A plain
+    library (no `main`, no `__main__` block) is merely unreachable, which is not drift.
+    """
+    try:
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+    except SyntaxError:
+        return "drift"
+    has_main = any(isinstance(node, ast.FunctionDef) and node.name == "main" for node in tree.body)
+    if has_main:
+        return "tool"
+    return "drift" if _has_main_block(tree) else "unreachable"
+
+
 def entry_report(bin_dir: Path) -> dict[str, list[str]]:
     """List the tools `python3 -m rig <tool>` can reach from a package directory, and the gaps.
 
@@ -68,11 +102,32 @@ def entry_report(bin_dir: Path) -> dict[str, list[str]]:
         A mapping with `"tools"` — the sorted names the dispatcher can run — and `"unreachable"` —
         the sorted module names it cannot reach. `--check` prints this mapping under the `entry` key
         of its JSON report.
-
-    Raises:
-        NotImplementedError: until the entry check is implemented.
     """
-    raise NotImplementedError
+    report: dict[str, list[str]] = {"tools": [], "unreachable": []}
+    for path in sorted((bin_dir / "rig").glob("*.py")):
+        if path.stem.startswith("_"):
+            continue
+        if _classify(path) == "tool":
+            report["tools"].append(path.stem)
+        else:
+            report["unreachable"].append(path.stem)
+    return report
+
+
+def entry_drift(bin_dir: Path) -> list[str]:
+    """The modules of the package that mean to be entry points but cannot be reached as one.
+
+    This is drift, not unreachability: a library module without a `main` is fine. Drift is a module
+    that no longer parses, or one that runs as `__main__` without exposing the `main` the dispatcher
+    would call.
+    """
+    drifted = []
+    for path in sorted((bin_dir / "rig").glob("*.py")):
+        if path.stem.startswith("_"):
+            continue
+        if _classify(path) == "drift":
+            drifted.append(path.stem)
+    return drifted
 
 
 def check(repo: Path) -> int:
@@ -116,6 +171,18 @@ def check(repo: Path) -> int:
     )
 
     print("\n".join(f"{row['item']:16} {row['state']:45} {row['live']}" for row in rows))
+
+    bin_dir = Path(__file__).resolve().parent.parent
+    entry = entry_report(bin_dir)
+    drifted = entry_drift(bin_dir)
+    report = {"entry": entry, "entry_drift": drifted}
+    print(json.dumps(report, indent=1))
+    if drifted:
+        print(
+            f"\nbroken entry point(s): {', '.join(drifted)}. "
+            f"These modules mean to be tools but the dispatcher cannot reach them."
+        )
+
     if drift:
         print(
             f"\n{drift} item(s) drifted from the repository. Live copies must be symlinks; "
