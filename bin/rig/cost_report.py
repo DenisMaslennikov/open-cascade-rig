@@ -16,25 +16,29 @@ cost in gateway prices (USD) | cost in OpenRouter list prices (USD):
 
   1. successful runs — a record with `state == "done"` and a `result.usage` block;
   2. failed attempts — everything else that is not a live run: the failed/killed/out-of-scope records,
-     a `starting`/`running` record whose pid is gone, plus the window's ledger spend that no
-     successful run explains.
+     a `starting`/`running` record whose pid is gone, plus the window's ledger spend that no run
+     explains.
 
 A run in progress — a record in `starting`/`running` whose pid the OS still holds (`os.kill(pid, 0)`
 succeeding, the test `run_records_reconcile.py` uses) — is neither a success nor a failure: it lands
 in neither table and the tool says on stderr that it skipped it, naming the run directory and the pid.
 
-Attribution: a ledger event belongs to a successful run when its `role` and `model` match that record
-and its `ts` falls inside `[record.started, record.started + result.usage.seconds]`. Every other event
-of the window is unattributed and is counted in the failed table. `record.started` carries the stamp
-`run_role.py` writes (`YYYYmmddTHHMMSSZ`); a ledger `ts` is an ISO 8601 timestamp.
+Attribution: a run is counted from one source, so no spend is counted twice. A ledger event belongs to
+the run whose `role` and `model` match that record and whose `ts` falls inside
+`[record.started, record.started + result.usage.seconds]`; when several runs qualify, the first wins.
+A successful run is counted from its record and its own events are skipped. A failed run is counted
+from the events of its window, or from `result.usage` only when the window holds no event for that run
+at all (a hand-killed run often leaves no ledger line). Every other event of the window belongs to no
+record and is counted in the failed table — that spend is real and unattributed. `record.started`
+carries the stamp `run_role.py` writes (`YYYYmmddTHHMMSSZ`); a ledger `ts` is an ISO 8601 timestamp.
 
 Sources: tokens from `result.usage.prompt_tokens`, `.completion_tokens` and `.cache_read_tokens`; the
-gateway column from `result.usage.cost_usd`; an unattributed ledger event from its own
-`input_tokens`, `output_tokens`, `cache_read_tokens` and `cost`. A record without a `result.usage`
-block contributes zeros. The OpenRouter column is recomputed from the cached catalogue at its USD per
-million tokens, rounded to four decimals; cache-read tokens are counted but not priced, because
-OpenRouter publishes no cache rate for every route and inventing one would flatter the total. Each
-table ends with a line starting with `TOTAL`.
+gateway column from `result.usage.cost_usd`; a ledger event from its own `input_tokens`,
+`output_tokens`, `cache_read_tokens` and `cost`. A record without a `result.usage` block contributes
+zeros. The OpenRouter column is recomputed from the cached catalogue at its USD per million tokens,
+rounded to four decimals; cache-read tokens are counted but not priced, because OpenRouter publishes
+no cache rate for every route and inventing one would flatter the total. Each table ends with a line
+starting with `TOTAL`.
 
 CLI:
   cost_report.py --project <slug> [--days N] [--json]
@@ -224,6 +228,22 @@ def _absorb(rows: dict[tuple[str, str], dict], models: dict, role: str, model: s
     return row
 
 
+def _absorb_event(rows: dict[tuple[str, str], dict], models: dict, event: dict) -> None:
+    """Add one ledger event to the row of its role + model; the event names its cost `cost`."""
+    _absorb(
+        rows,
+        models,
+        str(event.get("role") or "?"),
+        str(event.get("model") or "?"),
+        {
+            "input_tokens": event.get("input_tokens"),
+            "output_tokens": event.get("output_tokens"),
+            "cache_read_tokens": event.get("cache_read_tokens"),
+            "gateway_usd": event.get("cost"),
+        },
+    )
+
+
 def _finish(rows: Iterable[dict]) -> list[dict]:
     return sorted(rows, key=lambda row: (row["role"], row["model"]))
 
@@ -232,17 +252,17 @@ def _totals(rows: list[dict]) -> dict:
     return {field: round(sum(row[field] for row in rows), 4) for field in FIELDS}
 
 
-def _attributed(event: dict, moment: datetime, successful: list[tuple[dict, datetime, datetime]]) -> bool:
-    """Whether a ledger event belongs to a successful run: same role and model, `ts` inside the run.
+def _attributed(event: dict, moment: datetime, runs: list[tuple[dict, datetime, datetime]]) -> bool:
+    """Whether a ledger event belongs to a run: same role and model, `ts` inside the run's window.
 
     A record's window is `[record.started, record.started + result.usage.seconds]`; the stamp and the
     ledger `ts` are both converted to aware UTC before the comparison (see `_stamp_moment` and
-    `_iso_moment`).
+    `_iso_moment`). When several runs match, the first wins, so an event is claimed by one run only.
     """
-    for record, start, end in successful:
+    for _record, start, end in runs:
         if (
-            record.get("role") == event.get("role")
-            and record.get("model") == event.get("model")
+            _record.get("role") == event.get("role")
+            and _record.get("model") == event.get("model")
             and start <= moment <= end
         ):
             return True
@@ -260,7 +280,7 @@ def collect(project: str, days: int) -> dict[str, Any]:
     since = datetime.now(UTC) - timedelta(days=days)
     models: dict = json.loads(CACHE.read_text(encoding="utf-8"))["models"]
 
-    successful: list[tuple[dict, datetime, datetime]] = []
+    runs: list[tuple[dict, datetime, datetime]] = []
     failed_records: list[dict] = []
     skipped: list[str] = []
     for record, run_dir in _read_records(project, since):
@@ -268,14 +288,14 @@ def collect(project: str, days: int) -> dict[str, Any]:
         if record.get("state") == "done" and usage:
             started = _stamp_moment(record.get("started") or "") or since
             end = started + timedelta(seconds=float(usage.get("seconds") or 0))
-            successful.append((record, started, end))
+            runs.append((record, started, end))
         elif _is_live_run(record):
             skipped.append(f"skipped a run in progress: {run_dir} (pid {record.get('pid')})")
         else:
             failed_records.append(record)
 
     ok_rows: dict[tuple[str, str], dict] = {}
-    for record, _start, _end in successful:
+    for record, _start, _end in runs:
         usage = _usage_of(record)
         row = _absorb(
             ok_rows,
@@ -291,14 +311,49 @@ def collect(project: str, days: int) -> dict[str, Any]:
         )
         row["gateway_usd"] = round(row["gateway_usd"], 4)
 
+    def event_tokens(event: dict) -> dict:
+        return {
+            "input_tokens": event.get("input_tokens"),
+            "output_tokens": event.get("output_tokens"),
+            "cache_read_tokens": event.get("cache_read_tokens"),
+            "gateway_usd": event.get("cost"),
+        }
+
+    def _absorb_failed(role: str, model: str, tokens: dict) -> None:
+        _absorb(failed_rows, models, role, model, tokens)
+
+    events = _read_events(project, since)
+    moments = [_iso_moment(event.get("ts")) for event in events]
+
     failed_rows: dict[tuple[str, str], dict] = {}
+    claimed: set[tuple[str, str, datetime]] = set()
+
     for record in failed_records:
         usage = _usage_of(record)
+        role = str(record.get("role") or "?")
+        model = str(record.get("model") or "?")
+        started = _stamp_moment(record.get("started") or "") or since
+        end = started + timedelta(seconds=float(usage.get("seconds") or 0))
+        if usage:
+            # The run's own events first: the window is the ledger's answer for a failed run, the
+            # record's usage is the fallback for when the run left no ledger line at all.
+            has_window_event = any(
+                _attributed(event, moment, [(record, started, end)])
+                for event, moment in zip(events, moments, strict=True)
+            )
+            if has_window_event:
+                continue
+            has_role_model_event = any(
+                event.get("role") == record.get("role") and event.get("model") == record.get("model")
+                for event in events
+            )
+            if has_role_model_event:
+                continue
         _absorb(
             failed_rows,
             models,
-            str(record.get("role") or "?"),
-            str(record.get("model") or "?"),
+            role,
+            model,
             {
                 "input_tokens": usage.get("prompt_tokens"),
                 "output_tokens": usage.get("completion_tokens"),
@@ -306,22 +361,30 @@ def collect(project: str, days: int) -> dict[str, Any]:
                 "gateway_usd": usage.get("cost_usd"),
             },
         )
-    for event in _read_events(project, since):
-        moment = _iso_moment(event.get("ts"))
-        if moment is not None and _attributed(event, moment, successful):
+
+    for event, moment in zip(events, moments, strict=True):
+        if moment is not None and _attributed(event, moment, runs):
             continue
-        _absorb(
-            failed_rows,
-            models,
-            str(event.get("role") or "?"),
-            str(event.get("model") or "?"),
-            {
-                "input_tokens": event.get("input_tokens"),
-                "output_tokens": event.get("output_tokens"),
-                "cache_read_tokens": event.get("cache_read_tokens"),
-                "gateway_usd": event.get("cost"),
-            },
-        )
+        if moment is None:
+            _absorb_event(failed_rows, models, event)
+            continue
+        role = str(event.get("role") or "?")
+        model = str(event.get("model") or "?")
+        matched = False
+        for record, start, end in runs:
+            if record.get("role") != event.get("role") or record.get("model") != event.get("model"):
+                continue
+            if not start <= moment <= end:
+                continue
+            matched = True
+            if record.get("state") == "done":
+                break
+            if (role, model, start) not in claimed:
+                claimed.add((role, model, start))
+                _absorb_event(failed_rows, models, event)
+            break
+        if not matched:
+            _absorb_event(failed_rows, models, event)
 
     ok = _finish(ok_rows.values())
     failed = _finish(failed_rows.values())
