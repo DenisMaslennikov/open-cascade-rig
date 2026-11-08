@@ -76,13 +76,13 @@ Answer with exactly one JSON object and nothing else:
 Hard rules:
 - A `kind: "stub"` path comes from the subtask's `files_allowed` list. No other source file may be
   produced.
-- A `kind: "test"` path comes from the tests the plan already froze for this subtask, or — only for a
-  src-layout project — is derived deterministically from a stub: replace the leading `<contour>/src/`
-  with `<contour>/tests/unit/` and prefix the module name with `test_`
-  (`backend/src/app/domain/skills/sp.py` -> `backend/tests/unit/domain/skills/test_sp.py`).
-  One test file per stub module, all stubs covered. When the plan names the test files (a repository
-  whose tests live under `bin/tests/` or `tools/<name>/tests/`), use exactly those paths; do not
-  invent a mirrored one.
+- A `kind: "test"` path is a unit test in the feature's own folder: `<feature>/tests/test_<thing>.py`
+  (`tools/wrapper/rail_db.py` -> `tools/wrapper/tests/test_rail_db.py`, `bin/rig/gate.py` ->
+  `bin/tests/test_gate.py`). When the plan already names the test files, use exactly those paths.
+  Never mirror a source path into a `tests/unit/...` copy and never pair a test with a file by name:
+  which lines are covered is `coverage`'s answer, not the file system's.
+- Unit tests only for now: a test that needs the network, a database file or a running server is not
+  part of this subtask.
 - When a stub file already exists, keep its existing code verbatim (imports may be extended,
   `__all__` extended) and add only the signatures this subtask introduces. Never drop a function
   that already has a real implementation.
@@ -171,27 +171,21 @@ def build_user_message(subtask: dict, repo_doc: str, test_rules: str, plan_tests
     )
 
 
-def derived_test_path(stub_path: str) -> str:
-    """Where the tests of a stub live: the module path mirrored under tests/unit with test_."""
-    prefix = ""
-    rest = stub_path
-    for contour in ("backend/", "frontend/"):
-        if rest.startswith(contour):
-            prefix, rest = contour, rest[len(contour) :]
-            break
-    for src_root in ("src/", "app/", "lib/", "pkg/"):
-        if rest.startswith(src_root):
-            rest = rest[len(src_root) :]
-            break
-    # the package root of a src-layout project is not part of the mirrored path
-    for package_root in ("app/", "lib/", "pkg/"):
-        if rest.startswith(package_root):
-            rest = rest[len(package_root) :]
-            break
-    directory, _, name = rest.rpartition("/")
-    stem = name[:-3] if name.endswith(".py") else name
-    tail = f"{directory}/test_{stem}.py" if directory else f"test_{stem}.py"
-    return f"{prefix}tests/unit/{tail}"
+def test_directories(allowed: list[str]) -> set[str]:
+    """Where a subtask's unit tests live: the feature's own `tests/` directory.
+
+    A feature folder is the top level of the path the source sits in — `tools/wrapper/rail_db.py` ->
+    `tools/wrapper/tests/`, `bin/rig/gate.py` -> `bin/tests/` — so the suite travels with the feature
+    instead of being derived from a file name. Nothing here compares names: what is covered is a
+    question for `coverage`, not for a string match.
+    """
+    return {Path(path).parts[0] for path in allowed if path.endswith(".py") and len(Path(path).parts) > 1}
+
+
+def is_unit_test_path(path: str) -> bool:
+    """`<feature>/tests[/…]/test_*.py` — a unit test in the feature's own folder, nothing else."""
+    parts = Path(path).parts
+    return "tests" in parts[:-1] and parts[-1].startswith("test_") and parts[-1].endswith(".py")
 
 
 def write_files(
@@ -199,11 +193,8 @@ def write_files(
 ) -> tuple[bool, list[str]]:
     errors: list[str] = []
     normalized = [a.rstrip("/") for a in allowed]
-    # The mirrored `tests/unit/...` path is a src-layout convention. Other layouts name their tests
-    # explicitly in the plan (`plan_tests`), and for them the mirror would be a wrong path, not a hint.
-    src_layout = ("src/", "app/", "lib/", "pkg/")
-    expected_tests = {derived_test_path(a) for a in allowed if any(classify(a).startswith(p) for p in src_layout)}
-    expected_tests |= set(plan_tests or ())
+    frozen = set(plan_tests or ())
+    features = test_directories(allowed)
     for item in files:
         path = (item.get("path") or "").strip()
         kind = item.get("kind")
@@ -218,23 +209,18 @@ def write_files(
             path == a or path.startswith(a.rstrip("/") + "/") or (a.endswith(".py") and path == a) for a in normalized
         )
         if kind == "test":
-            stem_ok = any(path.endswith(f"test_{Path(a).stem}.py") for a in allowed)
-            under_tests = classify(path).startswith(TESTS_PREFIXES)
-            if plan_tests:
-                # The plan froze these tests; inventing a second home for them is how a suite grows a
-                # copy that nobody runs (the `tests/unit` mirror of a `tools/` stub is exactly that).
-                if path not in expected_tests:
-                    errors.append(f"{path}: the plan froze no such test file; expected one of {sorted(expected_tests)}")
-                    continue
-            elif path not in expected_tests and not (stem_ok and under_tests):
-                errors.append(f"{path}: a test must live at one of {sorted(expected_tests)}")
+            if not is_unit_test_path(path):
+                errors.append(f"{path}: a unit test lives at <feature>/tests/test_*.py")
+                continue
+            if frozen and path not in frozen:
+                errors.append(f"{path}: the plan froze no such test file; expected one of {sorted(frozen)}")
+                continue
+            if not frozen and Path(path).parts[0] not in features:
+                errors.append(f"{path}: a test lives in the feature's own tests/ directory, next to {sorted(features)}")
                 continue
             inside = True
         if not inside:
             errors.append(f"{path}: outside files_allowed {allowed}")
-            continue
-        if kind == "test" and not classify(path).startswith(TESTS_PREFIXES):
-            errors.append(f"{path}: a test file must live under {TEST_DIRS}")
             continue
         if kind == "stub" and not (
             classify(path).startswith(SRC_PREFIXES) and not classify(path).startswith(TESTS_PREFIXES)

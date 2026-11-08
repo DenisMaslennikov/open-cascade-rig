@@ -5,7 +5,7 @@
 PY ?= python3
 VENV ?= .venv
 
-.PHONY: help venv lint fmt test property mutation semgrep gitleaks decisions ci
+.PHONY: help venv lint fmt test cov property mutation semgrep gitleaks decisions ci
 
 help:
 	@grep -E '^[a-z-]+:' Makefile | sed 's/:.*//' | sort | column -c 100
@@ -22,6 +22,10 @@ fmt: venv
 
 test: venv
 	@cd bin && $(CURDIR)/$(VENV)/bin/python -m pytest
+
+# What is covered is a measurement, not a memory of which test file sits next to which module.
+cov: venv
+	@cd bin && $(CURDIR)/$(VENV)/bin/python -m pytest --cov=rig --cov=tools --cov-report=term-missing:skip-covered
 
 # Property tests answering "does this hold for every input, not just the example in the test"
 property: venv
