@@ -17,6 +17,7 @@ import json
 import os
 import subprocess
 import sys
+from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -25,6 +26,8 @@ from rig import config_init
 
 SLUG = "demo"
 MODEL = "deepseek/deepseek-v4-pro"
+# The states the tool treats as a run in progress: a set, not one string.
+LIVE_STATES = ("starting", "running")
 
 # USD per million tokens, as the OpenRouter catalogue cache stores them.
 CATALOGUE_IN = 0.27
@@ -81,6 +84,11 @@ def _starting(role: str, started: datetime, pid: int) -> dict:
         "started": _stamp(started),
         "model": MODEL,
     }
+
+
+def _in_progress(role: str, started: datetime, pid: int, state: str) -> dict:
+    """A record of a run that has not finished, in one of the tool's live states."""
+    return _starting(role, started, pid) | {"state": state}
 
 
 def _alive(pid: int) -> bool:
@@ -275,9 +283,20 @@ def failed_run_with_two_events(state_root: Path, now: datetime) -> dict:
 
 
 @pytest.fixture
-def live_run(state_root: Path, now: datetime) -> dict:
-    """A `starting` record whose pid is this test process, so the run is visibly still going."""
-    record = _starting("specifier", now - timedelta(hours=2), os.getpid())
+def sleeper() -> Iterator[subprocess.Popen]:
+    """A process of this test's own that is still running, and that started just now."""
+    process = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(120)"])
+    try:
+        yield process
+    finally:
+        process.terminate()
+        process.wait(timeout=10)
+
+
+@pytest.fixture
+def live_run(state_root: Path, sleeper: subprocess.Popen) -> dict:
+    """A `starting` record stamped as it starts, whose pid is a child process that started with it."""
+    record = _starting("specifier", datetime.now(UTC), sleeper.pid)
     _write_record(state_root, record)
     return record
 
@@ -505,3 +524,72 @@ def test_a_finished_unsuccessful_record_stays_in_the_failed_table(state_root, no
 
     assert payload["ok"] == []
     assert [row["role"] for row in payload["failed"]] == ["reviewer"]
+
+
+@pytest.mark.parametrize("state", LIVE_STATES)
+def test_a_record_whose_pid_was_reused_after_the_run_died_is_a_failed_attempt(state_root, now, sleeper, state):
+    """A process that started an hour after the record did is not the run: its spend stays in the table."""
+    _write_record(state_root, _in_progress("specifier", now - timedelta(hours=1), sleeper.pid, state))
+
+    proc = _run(state_root, "--project", SLUG, "--days", "7", "--json")
+
+    assert proc.returncode == 0, proc.stderr
+    payload = json.loads(proc.stdout)
+    assert payload["ok"] == []
+    assert [row["role"] for row in payload["failed"]] == ["specifier"]
+    assert "skip" not in proc.stderr.lower()
+
+
+@pytest.mark.parametrize("state", LIVE_STATES)
+def test_a_record_whose_pid_was_reused_does_not_lose_its_spend(state_root, now, sleeper, state):
+    """The spend of a dead run stays in the failed table even when the record carries no ledger line."""
+    record = _in_progress("specifier", now - timedelta(hours=1), sleeper.pid, state) | {
+        "result": {"usage": {"prompt_tokens": 100, "completion_tokens": 10, "cost_usd": 3.5, "seconds": 600}}
+    }
+    _write_record(state_root, record)
+    _write_events(state_root, [])
+
+    failed = _report_json(state_root)["failed"]
+
+    assert [row["role"] for row in failed] == ["specifier"]
+    assert failed[0]["input_tokens"] == 100
+    assert failed[0]["output_tokens"] == 10
+    assert failed[0]["gateway_usd"] == pytest.approx(3.5)
+
+
+@pytest.mark.parametrize("state", LIVE_STATES)
+def test_a_run_in_progress_whose_process_started_with_its_record_is_in_neither_table(state_root, sleeper, state):
+    _write_record(state_root, _in_progress("specifier", datetime.now(UTC), sleeper.pid, state))
+
+    payload = _report_json(state_root)
+
+    assert payload["ok"] == []
+    assert payload["failed"] == []
+    assert payload["totals"]["failed"]["gateway_usd"] == pytest.approx(0.0)
+    assert payload["totals"]["failed"]["input_tokens"] == 0
+
+
+@pytest.mark.parametrize("state", LIVE_STATES)
+def test_the_skip_message_names_the_run_directory_or_the_pid_of_a_live_run(state_root, sleeper, state):
+    started = datetime.now(UTC)
+    run_dir = _write_record(state_root, _in_progress("specifier", started, sleeper.pid, state))
+
+    proc = _run(state_root, "--project", SLUG, "--days", "7")
+
+    assert proc.returncode == 0, proc.stderr
+    assert "skip" in proc.stderr.lower()
+    assert str(sleeper.pid) in proc.stderr or str(run_dir) in proc.stderr
+
+
+@pytest.mark.parametrize("state", LIVE_STATES)
+@pytest.mark.parametrize(
+    "age",
+    [pytest.param(timedelta(0), id="stamped-now"), pytest.param(timedelta(hours=2), id="stamped-two-hours-ago")],
+)
+def test_a_live_state_record_whose_pid_is_dead_is_a_failed_attempt_whatever_its_stamp_says(state_root, now, state, age):
+    _write_record(state_root, _in_progress("specifier", now - age, _dead_pid(), state))
+
+    payload = _report_json(state_root)
+
+    assert payload["ok"] == []
+    assert [row["role"] for row in payload["failed"]] == ["specifier"]
