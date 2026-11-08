@@ -50,7 +50,7 @@ def create_app(
     are resolved against `static_dir` and a path that resolves outside it answers `404`.
 
     Arguments:
-n        cards: Answers the cards of a project slug, newest first, and raises `UnknownProjectError`
+        cards: Answers the cards of a project slug, newest first, and raises `UnknownProjectError`
             for a slug it does not serve.
         sessions: Answers the recent sessions, newest first, when given a row limit.
         static_dir: Directory holding `index.html` and the rail's assets.

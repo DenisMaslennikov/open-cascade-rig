@@ -1,81 +1,108 @@
-"""Frozen unit tests for the wrapper's HTTP routes.
+"""HTTP boundary of the rail application built by create_app: routes, statuses, static serving."""
 
-The app is built over in-memory card and session sources, so every case runs
-without a database, a network or a running server.
-"""
+from __future__ import annotations
 
+from collections.abc import Sequence
 from pathlib import Path
+from typing import Any
 
+import pytest
 from fastapi.testclient import TestClient
-from hypothesis import given, strategies as st
 
-from rail_server import create_app
+from tools.wrapper.rail_server import CardsSource, SessionsSource, UnknownProjectError, create_app
 
-STATIC_DIR = Path(__file__).resolve().parent
-SEEN_AT = "2026-01-01T00:00:00+00:00"
-
-
-class FakeCards(list):
-    """In-memory card source holding the card dicts the app renders."""
+STATIC_DIR = Path(__file__).resolve().parents[2] / "tools" / "wrapper" / "rail" / "design"
+SERVED_PROJECT = "occc"
 
 
-class FakeSessions(list):
-    """In-memory session source holding the session dicts the app renders."""
+def _cards_serving_one_project(project: str) -> Sequence[Any]:
+    if project != SERVED_PROJECT:
+        raise UnknownProjectError(project)
+    return []
 
 
-def make_client(cards: list[dict] | None = None, sessions: list[dict] | None = None) -> TestClient:
-    """Return a client over an app wired to the given in-memory sources.
-
-    Arguments:
-        cards: card dicts the fake card source holds.
-        sessions: session dicts the fake session source holds.
-
-    Returns:
-        A test client for the app; use it as a context manager so the lifespan runs.
-    """
-    return TestClient(create_app(FakeCards(cards or []), FakeSessions(sessions or []), STATIC_DIR))
+def _cards_that_fail(project: str) -> Sequence[Any]:
+    raise RuntimeError("board is down")
 
 
-def test_health_reports_ok() -> None:
-    with make_client() as client:
-        response = client.get("/api/health")
+def _sessions_answering_nothing(limit: int) -> Sequence[Any]:
+    return []
+
+
+def _sessions_that_fail(limit: int) -> Sequence[Any]:
+    raise RuntimeError("dashboard is down")
+
+
+def _client(
+    cards: CardsSource = _cards_serving_one_project,
+    sessions: SessionsSource = _sessions_answering_nothing,
+    static_dir: Path = STATIC_DIR,
+) -> TestClient:
+    return TestClient(create_app(cards=cards, sessions=sessions, static_dir=static_dir))
+
+
+def _rail_body(project: str = SERVED_PROJECT) -> dict[str, Any]:
+    return {"project": project, "seen": {}, "lang": "en"}
+
+
+def test_health_answers_ok_true() -> None:
+    response = _client().get("/api/health")
+
     assert response.status_code == 200
-    assert response.json()["ok"] is True
+    assert response.json() == {"ok": True}
 
 
-def test_rail_payload_is_empty_when_no_card_and_no_session_exists() -> None:
-    with make_client() as client:
-        response = client.post("/api/rail", json={})
+def test_rail_request_answers_the_payload_of_the_sources() -> None:
+    response = _client().post("/api/rail", json=_rail_body())
+
     assert response.status_code == 200
-    body = response.json()
-    assert body["cards"] == []
-    assert body["sessions"] == []
+    assert response.headers["content-type"].startswith("application/json")
+    assert isinstance(response.json(), dict)
 
 
-def test_a_card_source_reaches_the_rail_payload() -> None:
-    cards = [{"id": 7, "title": "Ship the rail", "status": "backlog"}]
-    with make_client(cards=cards) as client:
-        response = client.post("/api/rail", json={})
-    assert response.status_code == 200
-    assert [card["id"] for card in response.json()["cards"]] == [7]
-
-
-def test_a_seen_stamp_for_an_unknown_card_does_not_create_a_card() -> None:
-    with make_client() as client:
-        response = client.post("/api/rail", json={"seen": {"7": SEEN_AT}})
-    assert response.status_code == 200
-    assert response.json()["cards"] == []
-
-
-@given(
-    seen=st.dictionaries(
-        keys=st.integers(min_value=1, max_value=10**6).map(str),
-        values=st.just(SEEN_AT),
-        max_size=3,
-    )
+@pytest.mark.parametrize(
+    "raw_body",
+    [b"not json", b"[]", b'{"project": "occc", "seen": [], "lang": "en"}'],
+    ids=["invalid-json", "not-an-object", "seen-is-not-a-map"],
 )
-def test_a_seen_stamp_for_any_unknown_card_leaves_the_payload_empty(seen: dict[str, str]) -> None:
-    with TestClient(create_app(FakeCards(), FakeSessions(), STATIC_DIR)) as client:
-        response = client.post("/api/rail", json={"seen": seen})
+def test_malformed_body_answers_400(raw_body: bytes) -> None:
+    response = _client().post(
+        "/api/rail",
+        content=raw_body,
+        headers={"content-type": "application/json"},
+    )
+
+    assert response.status_code == 400
+
+
+def test_unknown_project_answers_400() -> None:
+    response = _client().post("/api/rail", json=_rail_body("nope"))
+
+    assert response.status_code == 400
+
+
+def test_cards_failure_answers_502_naming_the_board() -> None:
+    response = _client(cards=_cards_that_fail).post("/api/rail", json=_rail_body())
+
+    assert response.status_code == 502
+    assert response.json()["upstream"] == "board"
+
+
+def test_sessions_failure_answers_502_naming_the_dashboard() -> None:
+    response = _client(sessions=_sessions_that_fail).post("/api/rail", json=_rail_body())
+
+    assert response.status_code == 502
+    assert response.json()["upstream"] == "dashboard"
+
+
+def test_static_file_inside_the_directory_is_served() -> None:
+    response = _client().get("/rail.md")
+
     assert response.status_code == 200
-    assert response.json()["cards"] == []
+    assert response.content == (STATIC_DIR / "rail.md").read_bytes()
+
+
+def test_path_escaping_the_static_directory_answers_404() -> None:
+    response = _client().get("/../rail_server.py")
+
+    assert response.status_code == 404
