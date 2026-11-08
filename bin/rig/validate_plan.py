@@ -13,7 +13,7 @@
   5. файлы существуют в репозитории (если передан --repo);
   6. полный список файлов покрывает приёмочные сценарии задачи (≥1 файл src).
 
-CLI: python3 validate_plan.py plan.json [--repo /path/to/repo]
+CLI: cd ~/.config/cascade/bin && python3 -m rig.validate_plan plan.json [--repo /path/to/repo]
 Exit code 0 — план валиден, 1 — есть ошибки (печатаются в stderr).
 """
 
@@ -22,9 +22,13 @@ from __future__ import annotations
 import json
 import os
 import sys
+from pathlib import Path
 
-TESTS_PREFIXES = ("tests/", "test/")
-SRC_PREFIXES = ("src/", "app/", "lib/", "pkg/")
+TESTS_PREFIXES = ("tests/", "test/", "bin/tests/")
+# The repository's sources are not always under src/: the rig's own package is `bin/rig`, the
+# wrapper's tools are `tools/`, and a migration tree is `alembic/`. `bin/tests/` is matched by
+# TESTS_PREFIXES first, so a `bin/` entry does not turn a test subtask into a source one.
+SRC_PREFIXES = ("src/", "app/", "lib/", "pkg/", "bin/", "tools/", "alembic/")
 CONTOUR_PREFIXES = ("backend/", "frontend/")  # монорепо: контур перед src/tests
 
 
@@ -36,9 +40,22 @@ def classify(path: str) -> str:
     return path
 
 
+def schema_path() -> Path:
+    """`config/schema/plan.schema.json`, found by walking up, not by counting parents.
+
+    The module moved from `bin/` to `bin/rig/` (card #191) and a path built as `<here>/../schema`
+    silently started pointing at `bin/schema`. Walking up to the checkout that holds the schema is
+    the only form that survives the next move; the same marker trick lives in `bin/tests/conftest.py`.
+    """
+    for parent in Path(__file__).resolve().parents:
+        candidate = parent / "config" / "schema" / "plan.schema.json"
+        if candidate.is_file():
+            return candidate
+    raise FileNotFoundError("plan.schema.json not found: no parent directory holds config/schema/plan.schema.json")
+
+
 def load_schema() -> dict:
-    p = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "schema", "plan.schema.json")
-    with open(p) as f:
+    with open(schema_path()) as f:
         return json.load(f)
 
 
@@ -118,23 +135,14 @@ def ancestry(nodes: dict[str, list[str]], n: str) -> set[str]:
     return seen
 
 
-def main() -> int:
-    args = [a for a in sys.argv[1:] if not a.startswith("--")]
-    if not args:
-        print(__doc__)
-        return 2
-    plan_path = args[0]
-    repo = None
-    if "--repo" in sys.argv:
-        repo = sys.argv[sys.argv.index("--repo") + 1]
+def check_plan(plan: dict, repo: Path | None = None) -> list[str]:
+    """Every rule the schema cannot express; returns the errors, prints the notes.
 
-    with open(plan_path) as f:
-        plan = json.load(f)
-
+    A function of its own so a test can drive it: `main` only parses the argv and prints.
+    """
     errors = validate_schema(plan, load_schema())
     if errors:
-        print("\n".join(errors), file=sys.stderr)
-        return 1
+        return errors
 
     subs = plan["subtasks"]
     ids = [s["id"] for s in subs]
@@ -151,11 +159,11 @@ def main() -> int:
     if cyc:
         errors.append("цикл в depends_on: " + " -> ".join(cyc))
 
-    by_id = {s["id"]: s for s in subs}
     for s in subs:
         files = s["files_allowed"]
-        has_tests = any(classify(f).startswith(TESTS_PREFIXES) for f in files)
-        has_src = any(classify(f).startswith(SRC_PREFIXES) for f in files)
+        paths = [classify(f) for f in files]
+        has_tests = any(p.startswith(TESTS_PREFIXES) for p in paths)
+        has_src = any(p.startswith(SRC_PREFIXES) and not p.startswith(TESTS_PREFIXES) for p in paths)
         if has_tests and has_src:
             errors.append(
                 f"{s['id']}: файлы тестов и исходников в одной подзадаче — "
@@ -181,9 +189,28 @@ def main() -> int:
     if not any(any(classify(f).startswith(SRC_PREFIXES) for f in s["files_allowed"]) for s in subs):
         errors.append("в плане нет ни одной подзадачи с исходниками — задачи без кода не считаются покрытыми")
 
+    return errors
+
+
+def main() -> int:
+    args = [a for a in sys.argv[1:] if not a.startswith("--")]
+    if not args:
+        print(__doc__)
+        return 2
+    plan_path = args[0]
+    repo = None
+    if "--repo" in sys.argv:
+        repo = sys.argv[sys.argv.index("--repo") + 1]
+
+    with open(plan_path) as f:
+        plan = json.load(f)
+
+    errors = check_plan(plan, Path(repo) if repo else None)
+
     if errors:
         print("\n".join("ERROR: " + e for e in errors), file=sys.stderr)
         return 1
+    subs = plan["subtasks"]
     print(
         f"OK: план '{plan['task']['id']}' валиден, подзадач: {len(subs)}, "
         f"файлов: {len({f for s in subs for f in s['files_allowed']})}"

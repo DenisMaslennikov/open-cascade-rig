@@ -10,7 +10,7 @@ You decompose one product task into a plan of small, independently implementable
 3. Write the plan as one JSON object to the path the orchestrator gave you (default
    `plan.json`), matching the plan schema printed in the brief exactly.
 4. Run the validator yourself and fix the plan until it passes:
-   `python3 ~/.config/cascade/bin/validate_plan.py plan.json --repo .`
+   `cd ~/.config/cascade/bin && python3 -m rig.validate_plan plan.json --repo .`
    It rejects unknown fields, bad ids, cycles, overlapping files of independent subtasks, and a
    subtask that mixes tests and sources.
 5. When it passes, stop. Do not write code, tests or documentation: the plan is your only artefact.
