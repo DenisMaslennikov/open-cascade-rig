@@ -3,6 +3,8 @@ pytest>=8
 hypothesis>=6
 mutmut>=3
 ruff>=0.9
+# What is covered is a measurement, not a claim: `coverage` answers it, the file names do not.
+pytest-cov>=5
 # The wrapper's backend stack rides along so CI's single install line covers the whole suite: the
 # rail's tests import fastapi and drive it through `fastapi.testclient`, which needs httpx (card #203).
 -r requirements.txt

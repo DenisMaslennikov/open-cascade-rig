@@ -35,13 +35,15 @@ from pathlib import Path
 from .plan_task import (
     CONFIG,
     STATE,
+    call_model,
+    call_model_stream,
     extract_json,
     load_keys,
     parse_simple_yaml,
     repo_map,
     token_limit,
 )
-from .rig_conf import gateway
+from .rig_conf import app_root, gateway
 
 BIN = Path(__file__).resolve().parent
 
@@ -67,10 +69,10 @@ Answer with exactly one JSON object and nothing else:
 Hard rules:
 - A `kind: "stub"` path comes from the subtask's `files_allowed` list. No other source file may be
   produced.
-- A `kind: "test"` path is derived deterministically from a stub: replace the leading
-  `<contour>/src/` with `<contour>/tests/unit/` and prefix the module name with `test_`
-  (`backend/src/app/domain/skills/sp.py` -> `backend/tests/unit/domain/skills/test_sp.py`).
-  One test file per stub module, all stubs covered.
+- A `kind: "test"` path must be one of the test files the plan names for this subtask — exactly those
+  paths, nothing derived from a source file's name. If the plan names none, produce no test file.
+- Unit tests only for now: a test that needs the network, a database file or a running server is not
+  part of this subtask.
 - When a stub file already exists, keep its existing code verbatim (imports may be extended,
   `__all__` extended) and add only the signatures this subtask introduces. Never drop a function
   that already has a real implementation.
@@ -159,36 +161,12 @@ def build_user_message(subtask: dict, repo_doc: str, test_rules: str, plan_tests
     )
 
 
-def derived_test_path(stub_path: str) -> str:
-    """Where the tests of a stub live: the module path mirrored under tests/unit with test_."""
-    prefix = ""
-    rest = stub_path
-    for contour in ("backend/", "frontend/"):
-        if rest.startswith(contour):
-            prefix, rest = contour, rest[len(contour) :]
-            break
-    for src_root in ("src/", "app/", "lib/", "pkg/"):
-        if rest.startswith(src_root):
-            rest = rest[len(src_root) :]
-            break
-    # the package root of a src-layout project is not part of the mirrored path
-    for package_root in ("app/", "lib/", "pkg/"):
-        if rest.startswith(package_root):
-            rest = rest[len(package_root) :]
-            break
-    directory, _, name = rest.rpartition("/")
-    stem = name[:-3] if name.endswith(".py") else name
-    tail = f"{directory}/test_{stem}.py" if directory else f"test_{stem}.py"
-    return f"{prefix}tests/unit/{tail}"
-
-
 def write_files(
     worktree: Path, files: list[dict], allowed: list[str], force: bool, plan_tests: set[str] | None = None
 ) -> tuple[bool, list[str]]:
     errors: list[str] = []
     normalized = [a.rstrip("/") for a in allowed]
-    expected_tests = {derived_test_path(a) for a in allowed if "/src/" in f"/{a}"}
-    expected_tests |= set(plan_tests or ())
+    frozen = set(plan_tests or ())
     for item in files:
         path = (item.get("path") or "").strip()
         kind = item.get("kind")
@@ -203,20 +181,14 @@ def write_files(
             path == a or path.startswith(a.rstrip("/") + "/") or (a.endswith(".py") and path == a) for a in normalized
         )
         if kind == "test":
-            stem_ok = any(path.endswith(f"test_{Path(a).stem}.py") for a in allowed)
-            under_tests = "/tests/" in f"/{path}" or path.startswith("tests/")
-            if path not in expected_tests and not (stem_ok and under_tests):
-                errors.append(f"{path}: a test must live at one of {sorted(expected_tests)}")
+            # The architect named the test files; the specifier may not add a path of its own, and the
+            # gate does not guess which paths are tests — the plan says so.
+            if path not in frozen:
+                errors.append(f"{path}: the plan names no such test file; expected one of {sorted(frozen)}")
                 continue
             inside = True
         if not inside:
             errors.append(f"{path}: outside files_allowed {allowed}")
-            continue
-        if kind == "test" and "/tests/" not in f"/{path}":
-            errors.append(f"{path}: a test file must live under tests/")
-            continue
-        if kind == "stub" and "/src/" not in f"/{path}":
-            errors.append(f"{path}: a stub must live under src/")
             continue
         extending = (worktree / path).exists()  # an extension keeps real code, it is not a stub
         is_error_module = "Error(" in content and "NotImplementedError" not in content
@@ -342,8 +314,6 @@ def main() -> int:
 
     spec_dir_early = STATE / args.project / "specs" / args.subtask
     spec_dir_early.mkdir(parents=True, exist_ok=True)
-
-    from plan_task import call_model, call_model_stream
 
     raw, usage = call_model_stream(cfg, SYSTEM_PROMPT + HOUSE_RULES, user_message)
     (spec_dir_early / "raw.txt").write_text(raw, encoding="utf-8")
@@ -478,7 +448,7 @@ def main() -> int:
     sha = git(worktree, "rev-parse", "HEAD").stdout.strip()
     result["commit"] = sha
 
-    backend = worktree / "backend"
+    backend = app_root(worktree)
     rel_tests = [p.split("backend/", 1)[-1] if p.startswith("backend/") else p for p in test_paths]
     cmd = f"{args.python} -m pytest {' '.join(rel_tests)} -q"
     gate = subprocess.run(

@@ -13,32 +13,37 @@
   5. файлы существуют в репозитории (если передан --repo);
   6. полный список файлов покрывает приёмочные сценарии задачи (≥1 файл src).
 
-CLI: python3 validate_plan.py plan.json [--repo /path/to/repo]
+CLI: cd ~/.config/cascade/bin && python3 -m rig.validate_plan plan.json [--repo /path/to/repo]
 Exit code 0 — план валиден, 1 — есть ошибки (печатаются в stderr).
 """
 
 from __future__ import annotations
 
+import argparse
 import json
 import os
 import sys
+from pathlib import Path
 
-TESTS_PREFIXES = ("tests/", "test/")
-SRC_PREFIXES = ("src/", "app/", "lib/", "pkg/")
-CONTOUR_PREFIXES = ("backend/", "frontend/")  # монорепо: контур перед src/tests
+PLAN_KINDS = ("code", "tests", "docs")
 
 
-def classify(path: str) -> str:
-    """Отбрасывает префикс контура, чтобы src/ и tests/ распознавались в монорепо."""
-    for prefix in CONTOUR_PREFIXES:
-        if path.startswith(prefix):
-            return path[len(prefix) :]
-    return path
+def schema_path() -> Path:
+    """`config/schema/plan.schema.json`, found by walking up, not by counting parents.
+
+    The module moved from `bin/` to `bin/rig/` (card #191) and a path built as `<here>/../schema`
+    silently started pointing at `bin/schema`. Walking up to the checkout that holds the schema is
+    the only form that survives the next move; the same marker trick lives in `bin/tests/conftest.py`.
+    """
+    for parent in Path(__file__).resolve().parents:
+        candidate = parent / "config" / "schema" / "plan.schema.json"
+        if candidate.is_file():
+            return candidate
+    raise FileNotFoundError("plan.schema.json not found: no parent directory holds config/schema/plan.schema.json")
 
 
 def load_schema() -> dict:
-    p = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "schema", "plan.schema.json")
-    with open(p) as f:
+    with open(schema_path()) as f:
         return json.load(f)
 
 
@@ -118,23 +123,14 @@ def ancestry(nodes: dict[str, list[str]], n: str) -> set[str]:
     return seen
 
 
-def main() -> int:
-    args = [a for a in sys.argv[1:] if not a.startswith("--")]
-    if not args:
-        print(__doc__)
-        return 2
-    plan_path = args[0]
-    repo = None
-    if "--repo" in sys.argv:
-        repo = sys.argv[sys.argv.index("--repo") + 1]
+def check_plan(plan: dict, repo: Path | None = None) -> list[str]:
+    """Every rule the schema cannot express; returns the errors, prints the notes.
 
-    with open(plan_path) as f:
-        plan = json.load(f)
-
+    A function of its own so a test can drive it: `main` only parses the argv and prints.
+    """
     errors = validate_schema(plan, load_schema())
     if errors:
-        print("\n".join(errors), file=sys.stderr)
-        return 1
+        return errors
 
     subs = plan["subtasks"]
     ids = [s["id"] for s in subs]
@@ -151,18 +147,16 @@ def main() -> int:
     if cyc:
         errors.append("цикл в depends_on: " + " -> ".join(cyc))
 
-    by_id = {s["id"]: s for s in subs}
     for s in subs:
         files = s["files_allowed"]
-        has_tests = any(classify(f).startswith(TESTS_PREFIXES) for f in files)
-        has_src = any(classify(f).startswith(SRC_PREFIXES) for f in files)
-        if has_tests and has_src:
-            errors.append(
-                f"{s['id']}: файлы тестов и исходников в одной подзадаче — "
-                f"нарушает разделение «тесты пишет не тот, кто код»"
-            )
-        if not has_tests and not has_src and not files:
+        if s.get("kind") not in PLAN_KINDS:
+            errors.append(f"{s['id']}: kind должна быть одна из {PLAN_KINDS}, получено {s.get('kind')!r}")
+        if not files:
             errors.append(f"{s['id']}: files_allowed пуст")
+        for entry in files:
+            # A path outside the worktree is not a path the executor may touch, whatever it starts with.
+            if entry.startswith("/") or ".." in entry.split("/"):
+                errors.append(f"{s['id']}: путь должен быть относительным и без '..': {entry}")
         if repo:
             for f in files:
                 if not os.path.exists(os.path.join(repo, f)):
@@ -178,12 +172,34 @@ def main() -> int:
             if inter:
                 errors.append(f"{a['id']} и {b['id']} независимы, но делят файлы: {sorted(inter)}")
 
-    if not any(any(classify(f).startswith(SRC_PREFIXES) for f in s["files_allowed"]) for s in subs):
-        errors.append("в плане нет ни одной подзадачи с исходниками — задачи без кода не считаются покрытыми")
+    if not any(s.get("kind") == "code" for s in subs):
+        errors.append(
+            "в плане нет ни одной подзадачи с исходниками (kind: code) — задачи без кода не считаются покрытыми"
+        )
+
+    return errors
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(
+        prog="python3 -m rig.validate_plan",
+        description="Deterministic check of a decomposition plan against the plan schema and the rules.",
+        epilog=__doc__,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    parser.add_argument("plan", type=Path, help="plan JSON file")
+    parser.add_argument("--repo", type=Path, default=None, help="repository the plan's paths must exist in")
+    args = parser.parse_args(argv)
+
+    with open(args.plan) as f:
+        plan = json.load(f)
+
+    errors = check_plan(plan, args.repo)
 
     if errors:
         print("\n".join("ERROR: " + e for e in errors), file=sys.stderr)
         return 1
+    subs = plan["subtasks"]
     print(
         f"OK: план '{plan['task']['id']}' валиден, подзадач: {len(subs)}, "
         f"файлов: {len({f for s in subs for f in s['files_allowed']})}"
