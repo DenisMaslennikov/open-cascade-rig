@@ -20,3 +20,6 @@ __pycache__/
 mutants/
 .mutmut-cache/
 node_modules/
+
+# design renders are local, not artifacts (same rule as the OCCC design directory)
+tools/wrapper/rail/design/*.png
