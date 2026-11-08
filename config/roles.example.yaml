@@ -40,7 +40,18 @@ roles:
     temperature: 0.0
     max_tokens: null
     tool: "pr-agent"
-    # вход: plain-diff подзадачи; выход: отчёт ревью. Дешёвый вендор — на каждый малый diff.
+    # in: the plain diff of a subtask; out: the review report. Recommended model:
+    # ~anthropic/claude-haiku-latest — a third vendor (not the executor's ~z-ai/glm-*, not the
+    # specifier's ~deepseek/*), reliable enough to finish an agentic pass and produce a report,
+    # where minimax/minimax-m3.1-flash failed twice on a large diff. Cheap enough to run on every diff.
+  test_reviewer:
+    temperature: 0.0
+    max_tokens: null
+    # in: one function's spec, its stub, its frozen tests, the expect-fail output; out: one JSON
+    # verdict (pass/fail with findings). Runs between the specifier and the executor, before any
+    # code exists: a single non-agentic call, no tools, no worktree writes. Recommended model:
+    # ~anthropic/claude-haiku-latest — a vendor different from the specifier's and the executor's,
+    # strong enough to see that a property is unsatisfiable, cheap per pass.
   reviewer_final:
     temperature: 0.0
     max_tokens: null

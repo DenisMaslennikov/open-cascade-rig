@@ -112,23 +112,29 @@ feature branch before a human merges it.
    written — the methods, the logic, the functions — and **where** it lives.
 3. From the architect's analysis the specifier implements the stubs and the tests that cover the
    behaviour — one function per pass — and the tests are property-based (`hypothesis`).
-4. The executor takes those tests, the description of the logic and the stubs, and implements them —
+4. After the specifier's `expect-fail` gate is green and before the executor starts, a
+   `test_review` step checks each frozen function's tests against the plan's logic description
+   and acceptance pairs, in a single non-agentic call by a model of a vendor different from the
+   specifier's and the executor's. The executor starts only on a `pass` verdict; a `fail` returns
+   the findings to the specifier, and a finding that the plan itself is inconsistent goes to the
+   architect.
+5. The executor takes those tests, the description of the logic and the stubs, and implements them —
    also one function per run.
-5. The reviewer reviews the change of each function separately and says what to fix.
-6. The executor then closes the gaps in the logic's coverage: it freezes the implemented function
+6. The reviewer reviews the change of each function separately and says what to fix.
+7. The executor then closes the gaps in the logic's coverage: it freezes the implemented function
    against changes, writes the test for the uncovered behaviour, runs the tests, and if a test
    exposes a defect it fixes the function — the defect is fixed in the branch that is open, not
    written down for later (`## Tech debt`).
-7. The reviewer reads everything that is finished and criticises it in full: tests that test
+8. The reviewer reads everything that is finished and criticises it in full: tests that test
    nothing, logic that breaks on non-standard parameters — and says what to fix.
-8. Every function and every slice of business logic lands as its own `task/<feat>/<subtask>` branch
+9. Every function and every slice of business logic lands as its own `task/<feat>/<subtask>` branch
    merged into the card's feature branch `feat/<slug>`. **The pipeline merges it**: once the branch's
    own gates are green and its per-function review has no open blocking finding, the merge happens on
    its own — no human step, no waiting for the owner. After all of them are merged there is the final
    review by a stronger model — the `reviewer_final` run.
-9. When the final review asks for changes, **the architect decides** whether the changes are made —
-   not the orchestrator. The executor writes the changes; the tests, when needed, are written by the
-   specifier.
+10. When the final review asks for changes, **the architect decides** whether the changes are made —
+    not the orchestrator. The executor writes the changes; the tests, when needed, are written by the
+    specifier.
 
 The invariants the procedure stands on:
 
@@ -138,6 +144,9 @@ The invariants the procedure stands on:
   follow it.
 - The acceptance of a step is a command, and a step is finished when the command is green
   (`## Gates`).
+- The tests are checked against the plan before the executor starts: no run is spent on a function
+  whose frozen tests the plan's description cannot satisfy, and a plan that fails its own
+  `test_review` goes back to the architect, not to the executor.
 - The decision to rework after the final review belongs to the architect, the writing to the
   executor, the tests to the specifier — the orchestrator routes, it does not decide.
 - The reviewer reviews per function first and in full afterwards, and its second pass is where
