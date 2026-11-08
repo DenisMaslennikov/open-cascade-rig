@@ -30,6 +30,7 @@ from .plan_task import CONFIG, STATE, call_model_stream, extract_json, load_keys
 from .rig_conf import gateway, project_config
 
 BIN = Path(__file__).resolve().parent
+PKG_ROOT = BIN.parent
 
 REVIEW_BINARY_ENV = "CASCADE_REVIEW_BINARY"
 SETUP_TOOL = "setup_pr_agent.py"
@@ -425,7 +426,8 @@ def main() -> int:
         subprocess.run(
             [
                 sys.executable,
-                str(BIN / "usage.py"),
+                "-m",
+                "rig.usage",
                 "record",
                 "-p",
                 args.project,
@@ -446,6 +448,7 @@ def main() -> int:
             ],
             capture_output=True,
             text=True,
+            cwd=PKG_ROOT,
         )
     # The console block is what the owner reads — often on a phone, where a file path is useless.
     # So the message carries the review text itself (findings, not links), and the paths come last.
@@ -462,7 +465,9 @@ def main() -> int:
     report = "\n".join(lines)
     print(report)
     if args.notify:
-        subprocess.run([sys.executable, str(BIN / "notify.py"), "--text", report], capture_output=True, text=True)
+        subprocess.run(
+            [sys.executable, "-m", "rig.notify", "--text", report], capture_output=True, text=True, cwd=PKG_ROOT
+        )
     print(json.dumps(summary, ensure_ascii=False, indent=1))
     return 0
 

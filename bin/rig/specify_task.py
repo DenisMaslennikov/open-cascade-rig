@@ -46,6 +46,7 @@ from .plan_task import (
 from .rig_conf import app_root, gateway
 
 BIN = Path(__file__).resolve().parent
+PKG_ROOT = BIN.parent
 
 HOUSE_RULES = """
 HOUSE RULES (from the project owner, binding for every role):
@@ -235,7 +236,8 @@ def record_usage(slug: str, feature: str, task_id: str, model: str, usage: dict)
     cached = int((usage.get("prompt_tokens_details") or {}).get("cached_tokens") or 0)
     cmd = [
         sys.executable,
-        str(BIN / "usage.py"),
+        "-m",
+        "rig.usage",
         "record",
         "-p",
         slug,
@@ -256,7 +258,7 @@ def record_usage(slug: str, feature: str, task_id: str, model: str, usage: dict)
     ]
     if cached:
         cmd += ["--cache-read", str(cached)]
-    subprocess.run(cmd, capture_output=True, text=True)
+    subprocess.run(cmd, capture_output=True, text=True, cwd=PKG_ROOT)
 
 
 def git(worktree: Path, *args: str) -> subprocess.CompletedProcess:
@@ -452,9 +454,10 @@ def main() -> int:
     rel_tests = [p.split("backend/", 1)[-1] if p.startswith("backend/") else p for p in test_paths]
     cmd = f"{args.python} -m pytest {' '.join(rel_tests)} -q"
     gate = subprocess.run(
-        [sys.executable, str(BIN / "gate.py"), "expect-fail", "--repo", str(backend), "--cmd", cmd],
+        [sys.executable, "-m", "rig.gate", "expect-fail", "--repo", str(backend), "--cmd", cmd],
         capture_output=True,
         text=True,
+        cwd=PKG_ROOT,
     )
     result["red_gate"] = json.loads(gate.stdout or "{}")
     result["red_gate"]["command"] = cmd

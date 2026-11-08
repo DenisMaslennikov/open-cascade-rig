@@ -34,14 +34,19 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 BIN = Path(__file__).resolve().parent
+PKG_ROOT = BIN.parent
 STATE = Path(os.environ.get("XDG_STATE_HOME", Path.home() / ".local" / "state")) / "cascade"
 BLOCKING = {"blocker", "major"}
 FINDING = re.compile(r"^\s*[-*]\s*\[(blocker|major|minor)\]\s*(.+)$", re.I)
 
 
 def run_json(cmd: list[str], cwd: Path, timeout: int) -> tuple[dict, int, str]:
-    """Run a pipeline script and parse the trailing JSON object it prints."""
-    proc = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, timeout=timeout)
+    """Run a pipeline script and parse the trailing JSON object it prints.
+
+    Every command here launches a sibling as `python -m rig.<tool>`, so the child needs the
+    package's parent directory as its cwd; the explicit worktree reaches the child through its own flags.
+    """
+    proc = subprocess.run(cmd, cwd=PKG_ROOT, capture_output=True, text=True, timeout=timeout)
     text = proc.stdout
     start = text.rfind("\n{\n")
     if start < 0 and text.lstrip().startswith("{"):
@@ -93,7 +98,7 @@ def review_brief(project: str, subtask: str, worktree: Path) -> Path:
 
 
 def notify(text: str) -> None:
-    subprocess.run([sys.executable, str(BIN / "notify.py"), "--text", text], capture_output=True, text=True)
+    subprocess.run([sys.executable, "-m", "rig.notify", "--text", text], capture_output=True, text=True, cwd=PKG_ROOT)
 
 
 def main() -> int:
@@ -155,7 +160,8 @@ def main() -> int:
             diff_file.write_text(diff_text, encoding="utf-8")
             review_cmd = [
                 sys.executable,
-                str(BIN / "pr_review.py"),
+                "-m",
+                "rig.pr_review",
                 "--project",
                 args.project,
                 "--mode",
@@ -174,7 +180,8 @@ def main() -> int:
         else:
             review_cmd = [
                 sys.executable,
-                str(BIN / "run_role.py"),
+                "-m",
+                "rig.run_role",
                 "--project",
                 args.project,
                 "--role",
@@ -262,7 +269,8 @@ def main() -> int:
         feedback = "\n".join(f"- [{f['severity']}] {f['text']}" for f in blocking)
         fix_cmd = [
             sys.executable,
-            str(BIN / "run_subtask.py"),
+            "-m",
+            "rig.run_subtask",
             "--project",
             args.project,
             "--plan",

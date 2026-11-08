@@ -43,6 +43,7 @@ from .plan_task import (  # the gateway plumbing lives in one place
 )
 
 BIN = Path(__file__).resolve().parent
+PKG_ROOT = BIN.parent
 
 MAX_REQUEST_CHARS = 30000
 
@@ -152,7 +153,8 @@ def record(cfg: dict, usage: dict, feature: str, task_id: str) -> None:
         return
     cmd = [
         sys.executable,
-        str(BIN / "usage.py"),
+        "-m",
+        "rig.usage",
         "record",
         "-p",
         cfg["slug"],
@@ -174,7 +176,7 @@ def record(cfg: dict, usage: dict, feature: str, task_id: str) -> None:
     cached = int((usage.get("prompt_tokens_details") or {}).get("cached_tokens") or 0)
     if cached:
         cmd += ["--cache-read", str(cached)]
-    subprocess.run(cmd, capture_output=True, text=True)
+    subprocess.run(cmd, capture_output=True, text=True, cwd=PKG_ROOT)
 
 
 def validate(roadmap: dict) -> list[str]:

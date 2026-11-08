@@ -37,6 +37,7 @@ from .plan_task import CONFIG, STATE, load_keys, parse_simple_yaml, token_limit
 from .rig_conf import gateway
 
 BIN = Path(__file__).resolve().parent
+PKG_ROOT = BIN.parent
 
 OH_VENV = Path.home() / "soft" / "openhands" / ".venv"
 BIN_PY = OH_VENV / "bin" / "python"
@@ -226,7 +227,8 @@ def metrics_of(conversation) -> dict:
 def record_usage(slug: str, role: str, model: str, usage: dict) -> None:
     cmd = [
         sys.executable,
-        str(BIN / "usage.py"),
+        "-m",
+        "rig.usage",
         "record",
         "-p",
         slug,
@@ -247,7 +249,12 @@ def record_usage(slug: str, role: str, model: str, usage: dict) -> None:
     ]
     if usage.get("cache_read_tokens"):
         cmd += ["--cache-read", str(usage["cache_read_tokens"])]
-    subprocess.run(cmd, capture_output=True, text=True)
+    # A lost cost record must stay visible: name the ledger and let the child say why it failed.
+    proc = subprocess.run(cmd, capture_output=True, text=True, cwd=PKG_ROOT)
+    if proc.returncode != 0:
+        ledger = STATE / slug / "usage.jsonl"
+        reason = (proc.stderr or proc.stdout).strip() or "the usage tool produced no output"
+        print(f"WARNING: usage ledger not updated ({ledger}): {reason}", file=sys.stderr)
 
 
 def gateway_prices(model: str) -> dict[str, float] | None:
